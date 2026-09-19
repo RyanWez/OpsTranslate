@@ -117,6 +117,10 @@ PROVIDER_COST_PER_MSG_USD = _get_float("PROVIDER_COST_PER_MSG_USD", 0.0004)
 # Empty = gate disabled (falls back to the static allowlist only).
 GROUP_CHAT_ID = _get_int("GROUP_CHAT_ID", 0)
 GROUP_CACHE_TTL_S = _get_int("GROUP_CACHE_TTL_S", 6 * 3600)  # default 6h
+# Deny verdicts expire fast: a user added to the group gets in within
+# minutes instead of waiting out the 6h allow cache. Joins are rare,
+# leaves are sticky - fail-closed stays, join-latency shrinks.
+GROUP_DENY_TTL_S = _get_int("GROUP_DENY_TTL_S", 300)  # default 5 min
 
 # --- Seeding ----------------------------------------------------------------
 ALLOWED_USER_IDS = _get_id_list("ALLOWED_USER_IDS")

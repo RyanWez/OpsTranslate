@@ -172,6 +172,14 @@ class Cache:
                 pass
         self._mem.set(key, value, ex=ex)
 
+    async def delete(self, key: str) -> None:
+        if self._redis is not None:
+            try:
+                await self._redis.delete(key)
+            except Exception:  # noqa: BLE001
+                pass
+        self._mem._data.pop(key, None)
+
     # -- generic counters (spend cap, daily soft cap) --------------------------
     async def incr(self, key: str, ex: int) -> int:
         if self._redis is not None:

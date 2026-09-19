@@ -40,6 +40,7 @@ def _group_env(monkeypatch):
     monkeypatch.setattr(config, "TEST_ALLOW_ALL", False)
     monkeypatch.setattr(config, "GROUP_CHAT_ID", -100123456)
     monkeypatch.setattr(config, "GROUP_CACHE_TTL_S", 3600)
+    monkeypatch.setattr(config, "GROUP_DENY_TTL_S", 300)
     monkeypatch.setattr(config, "ALLOWED_USER_IDS", [])
     monkeypatch.setattr(config, "ADMIN_USER_IDS", [])
 
@@ -145,3 +146,39 @@ async def test_expired_cache_refetches(monkeypatch):
     await cache.set_str("grp:-100123456:24", f"{verdict}:{time.time() - 10}", ex=60)
     await is_group_member(bot, cache, 24)
     assert bot.calls == 2
+
+
+async def test_deny_expires_fast_allow_lasts_long():
+    # A deny verdict expires after GROUP_DENY_TTL_S, so a join takes
+    # effect within minutes; an allow verdict keeps the long TTL.
+    bot, cache = FakeBot("kicked"), Cache("")
+    await is_group_member(bot, cache, 25)
+    assert bot.calls == 1
+    raw = await cache.get_str("grp:-100123456:25")
+    verdict = raw.partition(":")[0]
+    # 6 minutes old: past the 5-min deny TTL -> must re-verify.
+    await cache.set_str("grp:-100123456:25", f"{verdict}:{time.time() - 360}", ex=60)
+    bot._status = "member"  # user joined the group since the deny
+    allowed, reason = await is_group_member(bot, cache, 25)
+    assert allowed and reason == "member:member"
+    assert bot.calls == 2
+
+
+async def test_start_cmd_forces_fresh_lookup():
+    # /start skips the cache: a cached deny from before the join must not
+    # block the first /start after joining.
+    bot, cache = FakeBot("kicked"), Cache("")
+    await is_group_member(bot, cache, 26)
+    assert bot.calls == 1
+    bot._status = "member"
+    allowed, reason = await is_group_member(bot, cache, 26, start_cmd=True)
+    assert allowed and reason == "member:member"
+    assert bot.calls == 2
+
+
+async def test_start_cmd_falls_back_to_stale_on_error():
+    bot, cache = FakeBot("member"), Cache("")
+    await is_group_member(bot, cache, 27)
+    bot.fail = True
+    allowed, reason = await is_group_member(bot, cache, 27, start_cmd=True)
+    assert allowed and reason == "stale_allow"

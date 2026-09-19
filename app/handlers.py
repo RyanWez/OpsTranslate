@@ -61,16 +61,20 @@ def _is_private(message: Message) -> bool:
     return getattr(message.chat, "type", "private") == "private"
 
 
-async def _gate_access(services: Services, message: Message) -> bool:
+async def _gate_access(
+    services: Services, message: Message, start_cmd: bool = False
+) -> bool:
     """Phase 0 access gate: private chat AND group member (or allowlist).
 
     Non-members get NOTHING (silent drop). TEST_ALLOW_ALL=true bypasses
-    everything for local tests.
+    everything for local tests. start_cmd=True forces a fresh Telegram
+    lookup so /start works the moment a user joins the group.
     """
     if not _is_private(message):
         return False
     allowed, reason = await is_group_member(
-        services.bot, services.cache, message.from_user.id
+        services.bot, services.cache, message.from_user.id,
+        start_cmd=start_cmd,
     )
     if not allowed:
         log.info("access_denied user=%s reason=%s", message.from_user.id, reason)
@@ -89,7 +93,9 @@ async def _gate_allowlist(services: Services, user_id: int) -> tuple[bool, str]:
 
 @router.message(Command("start"))
 async def cmd_start(message: Message, services: Services) -> None:
-    if not await _gate_access(services, message):
+    # Fresh lookup: a user added to the group must get in on the first
+    # /start, never wait out a cached deny from before they joined.
+    if not await _gate_access(services, message, start_cmd=True):
         return
     await services.user_store.set_target(message.from_user.id, "en")
     await message.answer(strings.WELCOME)

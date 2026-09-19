@@ -2,14 +2,20 @@
 
 Private-chat requests are served ONLY when the sender is a member of the
 ops group (GROUP_CHAT_ID). Membership is verified with Telegram's
-getChatMember and cached per (group, user) for GROUP_CACHE_TTL_S so a
-message does not cost an extra API call.
+getChatMember and cached per (group, user).
+
+Cache lifetimes are asymmetric on purpose:
+  allow verdicts -> GROUP_CACHE_TTL_S (default 6h; a leave takes effect
+                    when it expires, an API call only every 6h per user)
+  deny verdicts  -> GROUP_DENY_TTL_S (default 5 min; a freshly added member
+                    gets in within minutes, not hours)
 
 Decision table:
   TEST_ALLOW_ALL                                  -> allow (test mode)
   GROUP_CHAT_ID unset                             -> static allowlist only
   static allowlist hit (seeded staff/admin)       -> allow (admin override,
                                                      survives a group kick)
+  fresh recheck requested (start_cmd=True)        -> skip cache, ask Telegram
   getChatMember -> member/administrator/creator   -> allow
   getChatMember -> restricted (is_member=True)    -> allow
   getChatMember -> left/kicked/restricted         -> deny (silent drop)
@@ -48,8 +54,21 @@ def _parse_cached(raw: str | None) -> tuple[bool | None, float]:
         return None, 0.0
 
 
-async def is_group_member(bot, cache, user_id: int) -> tuple[bool, str]:
+def _ttl_for(decision: bool) -> int:
+    """Allow verdicts live long; deny verdicts expire fast (quick join)."""
+    if decision:
+        return config.GROUP_CACHE_TTL_S or 6 * 3600
+    return config.GROUP_DENY_TTL_S or 300
+
+
+async def is_group_member(
+    bot, cache, user_id: int, start_cmd: bool = False
+) -> tuple[bool, str]:
     """Return (allowed, reason). Never raises - errors resolve to a verdict.
+
+    start_cmd=True forces a fresh Telegram lookup (used by /start so a
+    freshly added member never waits out a cached deny), then updates the
+    cache with the new verdict.
 
     Reasons: test_mode | no_group_config | allowlist | member:<status> |
     non_member:<status> | stale_allow | stale_deny |
@@ -73,13 +92,20 @@ async def is_group_member(bot, cache, user_id: int) -> tuple[bool, str]:
         return True, "allowlist"
 
     key = _cache_key(group_id, user_id)
-    ttl = config.GROUP_CACHE_TTL_S or 6 * 3600
-    cached_decision, cached_at = _parse_cached(await cache.get_str(key))
-    fresh = cached_decision is not None and (time.time() - cached_at) < ttl
-    if fresh:
-        assert cached_decision is not None
-        return cached_decision, ("member:cached" if cached_decision
-                                 else "non_member:cached")
+
+    cached_decision: bool | None = None
+    cached_at = 0.0
+    if not start_cmd:
+        cached_decision, cached_at = _parse_cached(await cache.get_str(key))
+        if cached_decision is not None:
+            ttl = _ttl_for(cached_decision)
+            if (time.time() - cached_at) < ttl:
+                return cached_decision, ("member:cached" if cached_decision
+                                         else "non_member:cached")
+    else:
+        # /start path: peek at the cache only as an error fallback, never
+        # as an answer - a join must take effect immediately.
+        cached_decision, cached_at = _parse_cached(await cache.get_str(key))
 
     try:
         member = await bot.get_chat_member(chat_id=group_id, user_id=user_id)
@@ -101,5 +127,12 @@ async def is_group_member(bot, cache, user_id: int) -> tuple[bool, str]:
     else:  # left, kicked, unknown strings: not a member.
         verdict = (False, f"non_member:{status or 'unknown'}")
 
-    await cache.set_str(key, f"{1 if verdict[0] else 0}:{time.time()}", ex=ttl)
+    await cache.set_str(key, f"{1 if verdict[0] else 0}:{time.time()}",
+                        ex=_ttl_for(verdict[0]))
     return verdict
+
+
+async def drop_cached_verdict(cache, user_id: int) -> None:
+    """Forget one user's cached verdict (admin tooling / tests)."""
+    if config.GROUP_CHAT_ID:
+        await cache.delete(_cache_key(config.GROUP_CHAT_ID, user_id))
