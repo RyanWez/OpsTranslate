@@ -48,7 +48,7 @@ class AlertManager:
         if self._bot is None and self.bot_token:
             from aiogram import Bot
 
-            from app import config as app_config
+            from .. import config as app_config
 
             self._bot = Bot(token=self.bot_token, session=app_config.telegram_session())
         return self._bot

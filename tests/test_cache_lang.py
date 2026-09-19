@@ -1,6 +1,6 @@
 """Tests for cache-key normalization and the language detector."""
-from app.cache import cache_key, normalize_for_key
-from app.langdetect import detect
+from app.services.cache import cache_key, normalize_for_key
+from app.policy.langdetect import detect
 
 
 def test_cache_key_normalization():

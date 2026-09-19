@@ -196,12 +196,12 @@ def deny_scan(text: str, dst: str, policy: Policy) -> list[str]:
 
 
 def _dominant_script(text: str) -> str:
-    from .langdetect import _script
+    from .langdetect import script_of
 
     counts: dict[str, int] = {}
     for ch in text:
         if not ch.isspace():
-            s = _script(ch)
+            s = script_of(ch)
             counts[s] = counts.get(s, 0) + 1
     if not counts:
         return "other"

@@ -20,7 +20,7 @@ from __future__ import annotations
 import os
 
 
-def _get(name: str, default: str = "") -> str:
+def get(name: str, default: str = "") -> str:
     return os.environ.get(name, default).strip()
 
 
@@ -53,29 +53,29 @@ def _get_id_list(name: str) -> list[int]:
 
 
 # --- Run mode ---------------------------------------------------------------
-MODE = _get("MODE", "polling").lower()  # polling | webhook
+MODE = get("MODE", "polling").lower()  # polling | webhook
 TEST_ALLOW_ALL = _get_bool("TEST_ALLOW_ALL", False)
 # Auto EN<->MM toggle: Myanmar input -> English output, English input ->
 # Myanmar output, no manual target switching. Enabled by the owner 2026-09-19.
 AUTO_TOGGLE = _get_bool("AUTO_TOGGLE", True)
 
 # --- Telegram ---------------------------------------------------------------
-BOT_TOKEN = _get("BOT_TOKEN")
-ALERT_BOT_TOKEN = _get("ALERT_BOT_TOKEN")
-ADMIN_CHAT_ID = _get("ADMIN_CHAT_ID")
-WEBHOOK_SECRET = _get("WEBHOOK_SECRET")            # X-Telegram-Bot-Api-Secret-Token header
-WEBHOOK_PATH_SECRET = _get("WEBHOOK_PATH_SECRET")  # path segment of the webhook URL
+BOT_TOKEN = get("BOT_TOKEN")
+ALERT_BOT_TOKEN = get("ALERT_BOT_TOKEN")
+ADMIN_CHAT_ID = get("ADMIN_CHAT_ID")
+WEBHOOK_SECRET = get("WEBHOOK_SECRET")            # X-Telegram-Bot-Api-Secret-Token header
+WEBHOOK_PATH_SECRET = get("WEBHOOK_PATH_SECRET")  # path segment of the webhook URL
 
 # --- AI provider (OpenAI-compatible chat completions) ------------------------
-PROVIDER_BASE_URL = _get("PROVIDER_BASE_URL").rstrip("/")
-PROVIDER_API_KEY = _get("PROVIDER_API_KEY")
-PROVIDER_MODEL = _get("PROVIDER_MODEL")
+PROVIDER_BASE_URL = get("PROVIDER_BASE_URL").rstrip("/")
+PROVIDER_API_KEY = get("PROVIDER_API_KEY")
+PROVIDER_MODEL = get("PROVIDER_MODEL")
 PROVIDER_TIMEOUT_S = _get_float("PROVIDER_TIMEOUT_S", 8.0)
 PROVIDER_MAX_CONCURRENCY = _get_int("PROVIDER_MAX_CONCURRENCY", 8)
 # Optional JSON list of backup providers, e.g.
 # PROVIDERS_JSON='[{"name":"backup","base_url":"https://...","api_key":"...","model":"...","priority":2}]'
 # When set, it replaces the single PROVIDER_* vars (which remain the default).
-PROVIDERS_JSON = _get("PROVIDER_JSON") or _get("PROVIDERS_JSON")
+PROVIDERS_JSON = get("PROVIDER_JSON") or get("PROVIDERS_JSON")
 
 
 def provider_defs() -> list[dict]:
@@ -100,8 +100,8 @@ def provider_defs() -> list[dict]:
     ]
 
 # --- Storage ----------------------------------------------------------------
-DATABASE_URL = _get("DATABASE_URL")  # Neon pooled connection string
-REDIS_URL = _get("REDIS_URL")
+DATABASE_URL = get("DATABASE_URL")  # Neon pooled connection string
+REDIS_URL = get("REDIS_URL")
 
 # --- Product rules ----------------------------------------------------------
 MAX_INPUT_CHARS = _get_int("MAX_INPUT_CHARS", 250)
@@ -153,10 +153,10 @@ def telegram_session():
     proxy is configured (aiogram default: direct connection).
     """
     proxy = (
-        _get("HTTPS_PROXY")
-        or _get("https_proxy")
-        or _get("ALL_PROXY")
-        or _get("all_proxy")
+        get("HTTPS_PROXY")
+        or get("https_proxy")
+        or get("ALL_PROXY")
+        or get("all_proxy")
     )
     if not proxy:
         return None

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 
-from . import config
+from .. import config
 from . import db as dbmod
 
 log = logging.getLogger("opstranslate.users")

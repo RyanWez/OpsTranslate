@@ -52,10 +52,10 @@ token afterwards (`@BotFather` -> `/revoke`).
 ```bash
 export DATABASE_URL="postgresql://...neon.tech/db?sslmode=require"
 .venv/bin/alembic upgrade head
-.venv/bin/python -m app.seed
+.venv/bin/python -m app.store.seed
 ```
 
-With `DATABASE_URL` set, `alembic upgrade head && python -m app.seed` also run
+With `DATABASE_URL` set, `alembic upgrade head && python -m app.store.seed` also run
 at container start (see `Dockerfile`). Seeding is idempotent: allowlist ids
 from `ALLOWED_USER_IDS` get the `staff` role; ids in `ADMIN_USER_IDS` get
 `admin`; if `ADMIN_USER_IDS` is unset, the first `ALLOWED_USER_IDS` id becomes

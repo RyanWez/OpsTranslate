@@ -8,7 +8,7 @@ Creates tables (if missing) and seeds:
   - providers: the primary provider from env
   - prompts: the default system-prompt reference row
 
-Run:  python -m app.seed   (requires DATABASE_URL)
+Run:  python -m app.store.seed   (requires DATABASE_URL)
 Safe to re-run: existing rows are left untouched.
 """
 from __future__ import annotations
@@ -18,7 +18,7 @@ import logging
 
 from sqlalchemy import select
 
-from . import config
+from .. import config
 from . import db as dbmod
 from .models import (
     AllowedUser,
@@ -33,8 +33,8 @@ from .models import (
     TermOutput,
     TermVariant,
 )
-from .policy import build_system_prompt, compile_policy
-from .policy_data import CONCEPTS, DENY_TERMS
+from ..policy.policy import build_system_prompt, compile_policy
+from ..policy.policy_data import CONCEPTS, DENY_TERMS
 
 log = logging.getLogger("opstranslate.seed")
 

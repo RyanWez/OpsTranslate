@@ -1,7 +1,7 @@
 """Tests for the Term Policy engine: mask, render, deny-scan, entities."""
 import pytest
 
-from app.policy import (
+from app.policy.policy import (
     compile_policy,
     deny_scan,
     is_meta_response,

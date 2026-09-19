@@ -1,10 +1,10 @@
 """Tests for the repair loop: withhold-on-second-failure is the default."""
 import pytest
 
-from app.alerts import AlertManager
-from app.pipeline import PolicyRefusal, translate_policied
-from app.policy import compile_policy
-from app.provider import ProviderRouter
+from app.services.alerts import AlertManager
+from app.services.pipeline import PolicyRefusal, translate_policied
+from app.policy.policy import compile_policy
+from app.services.provider import ProviderRouter
 
 
 class LeakyRouter(ProviderRouter):

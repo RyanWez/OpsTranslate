@@ -22,6 +22,10 @@ import hashlib
 import logging
 import time
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..store.userstore import UserStore
 
 from aiogram.types import (
     CopyTextButton,
@@ -31,11 +35,12 @@ from aiogram.types import (
 )
 from aiogram.utils.chat_action import ChatActionSender
 
-from . import config, strings
+from .. import config
+from ..bot import strings
 from .cache import Cache, cache_key, duplicate_key
-from .langdetect import detect
+from ..policy.langdetect import detect
 from . import ratelimit
-from .policy import (
+from ..policy.policy import (
     PLACEHOLDER_RE,
     Policy,
     build_system_prompt,
@@ -74,7 +79,7 @@ class Services:
     cache: Cache
     alerts: AlertManager
     stats: Stats
-    user_store: "UserStore" = field(default=None)  # set in userstore module
+    user_store: UserStore | None = field(default=None)  # wired in main.build_services
     started_at: float = field(default_factory=time.monotonic)
 
 
@@ -315,8 +320,8 @@ async def _delete_placeholder(services: Services, chat_id: int, placeholder_id: 
 # ---------------------------------------------------------------------------
 
 async def log_usage(services: Services, **fields) -> None:
-    from . import db as dbmod
-    from .models import UsageLog
+    from ..store import db as dbmod
+    from ..store.models import UsageLog
 
     if not dbmod.is_configured():
         return

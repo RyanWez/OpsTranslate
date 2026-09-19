@@ -14,7 +14,7 @@ from __future__ import annotations
 CONFIDENCE_THRESHOLD = 0.60
 
 
-def _script(ch: str) -> str:
+def script_of(ch: str) -> str:
     o = ord(ch)
     if 0x1000 <= o <= 0x109F:
         return "myanmar"
@@ -61,7 +61,7 @@ def detect(text: str) -> tuple[str, float, str | None]:
     counts: dict[str, int] = {}
     total = 0
     for ch in text:
-        s = _script(ch)
+        s = script_of(ch)
         if s == "other":
             continue
         counts[s] = counts.get(s, 0) + 1

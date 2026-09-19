@@ -17,7 +17,7 @@ _session_factory = None
 
 
 def is_configured() -> bool:
-    from . import config
+    from .. import config
 
     return bool(config.DATABASE_URL)
 
@@ -27,7 +27,7 @@ def get_engine():
     if _engine is None:
         from sqlalchemy.ext.asyncio import create_async_engine
 
-        from . import config
+        from .. import config
 
         url = config.DATABASE_URL
         if url.startswith("postgresql://"):

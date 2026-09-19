@@ -32,7 +32,7 @@ from __future__ import annotations
 import logging
 import time
 
-from . import config
+from .. import config
 
 log = logging.getLogger("opstranslate.groupgate")
 
@@ -74,7 +74,7 @@ async def is_group_member(
     non_member:<status> | stale_allow | stale_deny |
     error_deny:<ExceptionName>.
     """
-    from .userstore import UserStore  # deferred: avoids a circular import
+    from ..store.userstore import UserStore
 
     if config.TEST_ALLOW_ALL:
         return True, "test_mode"

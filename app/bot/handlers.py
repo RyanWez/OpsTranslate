@@ -31,13 +31,12 @@ from aiogram.types import (
     CallbackQuery,
     ChatMemberUpdated,
     Message,
-    ReplyParameters,
 )
 
 from . import strings
-from . import config as configmod
+from .. import config as configmod
 from .groupgate import drop_cached_verdict, is_group_member
-from .pipeline import Services, run_translation
+from ..services.pipeline import Services, run_translation
 
 log = logging.getLogger("opstranslate.handlers")
 

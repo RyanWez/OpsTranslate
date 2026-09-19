@@ -8,8 +8,8 @@ import time
 import pytest
 
 from app import config
-from app.cache import Cache
-from app.groupgate import is_group_member
+from app.services.cache import Cache
+from app.bot.groupgate import is_group_member
 
 
 class FakeMember:

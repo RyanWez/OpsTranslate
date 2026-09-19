@@ -1,4 +1,4 @@
-"""Alembic environment: autogenerate from app.models metadata.
+"""Alembic environment: autogenerate from app.store.models metadata.
 
 The migration runs against DATABASE_URL at migrate time. Offline
 autogenerate (alembic revision --autogenerate) needs no live database.
@@ -15,7 +15,7 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-from app.models import Base  # noqa: E402
+from app.store.models import Base  # noqa: E402
 
 target_metadata = Base.metadata
 

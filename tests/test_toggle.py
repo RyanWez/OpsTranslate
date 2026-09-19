@@ -1,5 +1,5 @@
 """Tests for the auto EN<->MM toggle (owner request 2026-09-19)."""
-from app.pipeline import resolve_toggle_dst
+from app.services.pipeline import resolve_toggle_dst
 
 
 def test_myanmar_input_goes_to_english():

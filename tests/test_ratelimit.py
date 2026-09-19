@@ -1,5 +1,5 @@
 """Tests for the sliding-window rate limiter (2 per rolling 30s)."""
-from app import ratelimit
+from app.services import ratelimit
 
 
 def test_allows_two_then_rejects():

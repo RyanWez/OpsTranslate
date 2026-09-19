@@ -28,14 +28,14 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from . import config
-from .alerts import AlertManager
-from .cache import Cache
-from .handlers import setup as setup_handlers
-from .pipeline import Services
-from .policy import compile_policy
-from .provider import Provider, ProviderRouter
-from .stats import Stats
-from .userstore import UserStore
+from .services.alerts import AlertManager
+from .services.cache import Cache
+from .bot.handlers import setup as setup_handlers
+from .services.pipeline import Services
+from .policy.policy import compile_policy
+from .services.provider import Provider, ProviderRouter
+from .services.stats import Stats
+from .store.userstore import UserStore
 
 logging.basicConfig(
     level=logging.INFO,
@@ -115,7 +115,7 @@ async def lifespan(app: FastAPI):
 
         polling_task = asyncio.create_task(_poll())
     elif config.MODE == "webhook":
-        base = config._get("PUBLIC_URL", "").rstrip("/")
+        base = config.get("PUBLIC_URL", "").rstrip("/")
         if base and config.WEBHOOK_PATH_SECRET:
             url = f"{base}/webhook/{config.WEBHOOK_PATH_SECRET}"
             await bot.set_webhook(
@@ -131,7 +131,7 @@ async def lifespan(app: FastAPI):
     if polling_task is not None:
         polling_task.cancel()
     await services.router.close()
-    from . import db as dbmod
+    from .store import db as dbmod
 
     await dbmod.close()
     await bot.session.close()
@@ -161,7 +161,7 @@ async def webhook(
 
 @app.get("/healthz")
 async def healthz():
-    from . import db as dbmod
+    from .store import db as dbmod
 
     services: Services = app.state.services
     now_yangon = datetime.now(YANGON)
