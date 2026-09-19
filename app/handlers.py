@@ -27,11 +27,16 @@ import logging
 
 from aiogram import Bot, F, Router
 from aiogram.filters import Command
-from aiogram.types import CallbackQuery, Message, ReplyParameters
+from aiogram.types import (
+    CallbackQuery,
+    ChatMemberUpdated,
+    Message,
+    ReplyParameters,
+)
 
 from . import strings
 from . import config as configmod
-from .groupgate import is_group_member
+from .groupgate import drop_cached_verdict, is_group_member
 from .pipeline import Services, run_translation
 
 log = logging.getLogger("opstranslate.handlers")
@@ -263,3 +268,32 @@ def setup(router_services: Services, dp) -> None:
     """Make the Services object available to handlers via workflow data."""
     dp["services"] = router_services
     dp.include_router(router)
+
+
+# ---------------------------------------------------------------------------
+# Membership changes: keep the gate cache honest
+# ---------------------------------------------------------------------------
+
+@router.my_chat_member()
+async def on_membership_change(
+    event: ChatMemberUpdated, services: Services
+) -> None:
+    """A user joined or left the GP: drop their cached verdict at once.
+
+    Bot must be admin in the group for these events to arrive. Joins take
+    effect on the next message even without this (deny TTL is 5 min), but
+    a kick must lock the door immediately - not after the 6h allow cache
+    expires. Failures here must never break event handling.
+    """
+    try:
+        if not configmod.GROUP_CHAT_ID:
+            return
+        if event.chat.id != configmod.GROUP_CHAT_ID:
+            return
+        new_status = str(getattr(event.new_chat_member, "status", "") or "")
+        if new_status.lower() in ("left", "kicked"):
+            await drop_cached_verdict(services.cache, event.from_user.id)
+            log.info("verdict_dropped user=%s status=%s",
+                     event.from_user.id, new_status)
+    except Exception:  # noqa: BLE001 - bookkeeping must never raise
+        pass

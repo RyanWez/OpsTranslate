@@ -108,7 +108,10 @@ async def lifespan(app: FastAPI):
 
         async def _poll():
             log.info("starting polling mode")
-            await dp.start_polling(bot, allowed_updates=["message", "callback_query"])
+            await dp.start_polling(
+                bot,
+                allowed_updates=["message", "callback_query", "my_chat_member"],
+            )
 
         polling_task = asyncio.create_task(_poll())
     elif config.MODE == "webhook":
@@ -118,7 +121,7 @@ async def lifespan(app: FastAPI):
             await bot.set_webhook(
                 url,
                 secret_token=config.WEBHOOK_SECRET or None,
-                allowed_updates=["message", "callback_query"],
+                allowed_updates=["message", "callback_query", "my_chat_member"],
                 drop_pending_updates=True,
             )
             log.info("webhook registered")
