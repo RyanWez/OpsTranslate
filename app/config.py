@@ -111,6 +111,13 @@ POLICY_VERSION = _get_int("POLICY_VERSION", 1)
 DAILY_SPEND_CAP_USD = _get_float("DAILY_SPEND_CAP_USD", 5.0)
 PROVIDER_COST_PER_MSG_USD = _get_float("PROVIDER_COST_PER_MSG_USD", 0.0004)
 
+# --- Group gate (Phase 0: GP-member-only access) ---------------------------
+# Private DM requests are served ONLY to members of this group chat:
+# getChatMember(GROUP_CHAT_ID, user_id) -> member/administrator/creator.
+# Empty = gate disabled (falls back to the static allowlist only).
+GROUP_CHAT_ID = _get_int("GROUP_CHAT_ID", 0)
+GROUP_CACHE_TTL_S = _get_int("GROUP_CACHE_TTL_S", 6 * 3600)  # default 6h
+
 # --- Seeding ----------------------------------------------------------------
 ALLOWED_USER_IDS = _get_id_list("ALLOWED_USER_IDS")
 ADMIN_USER_IDS = _get_id_list("ADMIN_USER_IDS")

@@ -154,6 +154,24 @@ class Cache:
         else:
             self._mem.set(key, raw, ex=CACHE_TTL_S)
 
+    # -- generic string kv (group-membership cache, misc flags) ------------
+    async def get_str(self, key: str) -> str | None:
+        if self._redis is not None:
+            try:
+                return await self._redis.get(key)
+            except Exception:  # noqa: BLE001 - degrade to miss on Redis errors
+                return None
+        return self._mem.get(key)
+
+    async def set_str(self, key: str, value: str, ex: int) -> None:
+        if self._redis is not None:
+            try:
+                await self._redis.set(key, value, ex=ex)
+                return
+            except Exception:  # noqa: BLE001 - degrade to memory on Redis errors
+                pass
+        self._mem.set(key, value, ex=ex)
+
     # -- generic counters (spend cap, daily soft cap) --------------------------
     async def incr(self, key: str, ex: int) -> int:
         if self._redis is not None:

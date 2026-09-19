@@ -1,5 +1,13 @@
 """aiogram handlers: commands, language-button callbacks, plain messages.
 
+Access control (Phase 0 - GP-member-only):
+  * Private-DM only: group/supergroup/channel updates are ignored silently.
+  * The sender must be a member of the ops group (GROUP_CHAT_ID), verified
+    via getChatMember and cached; the static allowlist survives as an admin
+    override. TEST_ALLOW_ALL=true bypasses everything for local tests.
+  * Non-members get NOTHING (silent drop) - no placeholder, no error text,
+    no provider credit spent. The bot is invisible to outsiders.
+
 Input resolution (spec section 03), implemented exactly:
   plain message, no reply            -> translate that message
   plain message sent as a reply      -> translate the NEW message
@@ -9,8 +17,9 @@ Input resolution (spec section 03), implemented exactly:
   forwarded message                  -> translate the forwarded text
   reply to a message from the bot    -> ALREADY_TRANSLATED (plain messages)
 
-Callback-query handlers (the language buttons) pass the allowlist gate
-before doing anything else.
+Callback-query handlers (the language buttons) pass the access gate
+before doing anything else. /whoami stays exempt (it only reveals the
+caller's own user id, needed for allowlist seeding).
 """
 from __future__ import annotations
 
@@ -21,6 +30,8 @@ from aiogram.filters import Command
 from aiogram.types import CallbackQuery, Message, ReplyParameters
 
 from . import strings
+from . import config as configmod
+from .groupgate import is_group_member
 from .pipeline import Services, run_translation
 
 log = logging.getLogger("opstranslate.handlers")
@@ -45,12 +56,31 @@ def _strip_command(text: str) -> tuple[str, str]:
     return cmd, rest.strip()
 
 
+def _is_private(message: Message) -> bool:
+    """Private-DM only: group/supergroup/channel updates are ignored."""
+    return getattr(message.chat, "type", "private") == "private"
+
+
+async def _gate_access(services: Services, message: Message) -> bool:
+    """Phase 0 access gate: private chat AND group member (or allowlist).
+
+    Non-members get NOTHING (silent drop). TEST_ALLOW_ALL=true bypasses
+    everything for local tests.
+    """
+    if not _is_private(message):
+        return False
+    allowed, reason = await is_group_member(
+        services.bot, services.cache, message.from_user.id
+    )
+    if not allowed:
+        log.info("access_denied user=%s reason=%s", message.from_user.id, reason)
+    return allowed
+
+
 async def _gate_allowlist(services: Services, user_id: int) -> tuple[bool, str]:
+    """Static allowlist (admin override). The group gate already grants
+    seeded staff/admin; /status consults this directly for the admin role."""
     return await services.user_store.is_allowed(user_id)
-
-
-async def _not_authorized(message: Message, user_id: int) -> None:
-    await message.reply(strings.NOT_AUTHORIZED.format(user_id=user_id))
 
 
 # ---------------------------------------------------------------------------
@@ -59,9 +89,7 @@ async def _not_authorized(message: Message, user_id: int) -> None:
 
 @router.message(Command("start"))
 async def cmd_start(message: Message, services: Services) -> None:
-    allowed, _ = await _gate_allowlist(services, message.from_user.id)
-    if not allowed:
-        await _not_authorized(message, message.from_user.id)
+    if not await _gate_access(services, message):
         return
     await services.user_store.set_target(message.from_user.id, "en")
     await message.answer(strings.WELCOME)
@@ -69,25 +97,33 @@ async def cmd_start(message: Message, services: Services) -> None:
 
 @router.message(Command("help"))
 async def cmd_help(message: Message, services: Services) -> None:
-    allowed, _ = await _gate_allowlist(services, message.from_user.id)
-    if not allowed:
-        await _not_authorized(message, message.from_user.id)
+    if not await _gate_access(services, message):
         return
     await message.answer(strings.HELP)
 
 
 @router.message(Command("whoami"))
 async def cmd_whoami(message: Message, services: Services) -> None:
-    # EXEMPT from the allowlist gate: this is how new staff learn the ID
-    # they need to be added with.
+    # EXEMPT from the access gate: this is how new staff learn the ID
+    # they need to be added with. It reveals only the caller's own id,
+    # costs nothing, and works even for non-members. Still private-only
+    # so group chats stay quiet.
+    if not _is_private(message):
+        return
     await message.answer(f"Your Telegram user ID: {message.from_user.id}")
 
 
 @router.message(Command("status"))
 async def cmd_status(message: Message, services: Services) -> None:
-    allowed, role = await _gate_allowlist(services, message.from_user.id)
-    if not allowed or role != "admin":
-        await _not_authorized(message, message.from_user.id)
+    # Admin-only: group members without the admin role get nothing here
+    # (silent, like every other non-member path).
+    if not await _gate_access(services, message):
+        return
+    _, role = await _gate_allowlist(services, message.from_user.id)
+    # TEST_ALLOW_ALL grants admin in test mode; otherwise the static
+    # allowlist decides. Group membership alone is NOT enough for /status.
+    is_admin = role == "admin" or configmod.TEST_ALLOW_ALL
+    if not is_admin:
         return
     states = services.router.states()
     prov_lines = "\n".join(f"- {name}: {state}" for name, state in states.items()) or "- none"
@@ -105,9 +141,7 @@ async def cmd_status(message: Message, services: Services) -> None:
 
 @router.message(Command("tr"))
 async def cmd_tr(message: Message, services: Services, bot: Bot) -> None:
-    allowed, _ = await _gate_allowlist(services, message.from_user.id)
-    if not allowed:
-        await _not_authorized(message, message.from_user.id)
+    if not await _gate_access(services, message):
         return
 
     text = message.text or ""
@@ -149,14 +183,18 @@ async def cmd_tr(message: Message, services: Services, bot: Bot) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Language-button callbacks (allowlist-gated like any other request)
+# Language-button callbacks (access-gated like any other request)
 # ---------------------------------------------------------------------------
 
 @router.callback_query(F.data.startswith("lang:"))
 async def cb_lang(call: CallbackQuery, services: Services) -> None:
-    allowed, _ = await _gate_allowlist(services, call.from_user.id)
+    # Buttons only exist on the bot's own private-chat messages, but verify
+    # anyway: dismiss the spinner silently for outsiders, change nothing.
+    allowed, _ = await is_group_member(
+        services.bot, services.cache, call.from_user.id
+    )
     if not allowed:
-        await call.answer("Not authorized.", show_alert=True)
+        await call.answer()
         return
     lang = call.data.split(":", 1)[1]
     if lang not in ("my", "en"):
@@ -178,6 +216,12 @@ async def cb_lang(call: CallbackQuery, services: Services) -> None:
 
 @router.message(F.text | F.caption)
 async def on_text(message: Message, services: Services, bot: Bot) -> None:
+    # Gate 0 (Phase 0): private chat + group member, else silent drop.
+    # This runs BEFORE the type check so non-members never even learn the
+    # bot only handles text - the bot is fully invisible to outsiders.
+    if not await _gate_access(services, message):
+        return
+
     text = message.text or message.caption or ""
 
     # Gate 3: type check (empty text/caption cannot happen here, but be safe).
@@ -193,11 +237,8 @@ async def on_text(message: Message, services: Services, bot: Bot) -> None:
         await message.reply(strings.ALREADY_TRANSLATED)
         return
 
-    # Gate 4: allowlist.
-    allowed, _ = await _gate_allowlist(services, message.from_user.id)
-    if not allowed:
-        await _not_authorized(message, message.from_user.id)
-        return
+    # Gate 4 (static allowlist) is subsumed by the Phase 0 group gate above:
+    # is_group_member already grants seeded staff/admin. No second check.
 
     # Plain message sent as a reply: the reply relationship is ignored and
     # the NEW message is translated (avoids surprises).
