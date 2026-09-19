@@ -1,0 +1,16 @@
+# Keep-warm: ping /healthz every 5 minutes so Neon does not scale to zero.
+# This is a latency optimisation, NOT monitoring - the external uptime
+# monitor (UptimeRobot / BetterStack -> Telegram) is the dead-man's switch.
+name: keep-warm
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping healthz
+        run: curl -fsS -m 30 "${{ secrets.HEALTHZ_URL }}" > /dev/null
