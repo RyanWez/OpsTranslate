@@ -52,6 +52,7 @@ from ..policy.policy import (
     ratio_ok,
     render,
     restore_entities,
+    script_ok,
     strict_suffix,
 )
 from .provider import AllProvidersDown, ProviderRouter
@@ -138,14 +139,23 @@ async def translate_policied(
 
     out, provider = await router.translate(masked, prompt)
 
-    def _sane(o: str) -> bool:
-        return ratio_ok(text, o, src=src, dst=dst) and not is_meta_response(o)
+    def _problem(o: str) -> str | None:
+        """Why this output cannot be shipped, or None when it is usable."""
+        if not ratio_ok(text, o, src=src, dst=dst):
+            return "length ratio"
+        if is_meta_response(o):
+            return "meta response"
+        if not script_ok(o, dst):
+            return f"wrong script for {dst}"
+        return None
 
     # Sanity gate: one retry on garbage output, then give up.
-    if not _sane(out):
+    problem = _problem(out)
+    if problem:
         out, provider = await router.translate(masked, prompt, force=provider)
-        if not _sane(out):
-            raise AllProvidersDown("unstable output")
+        problem = _problem(out)
+        if problem:
+            raise AllProvidersDown(f"unstable output ({problem})")
 
     rendered = render(out, dst, policy)  # Layer 2 post
     leaks = deny_scan(rendered, dst, policy)  # Layer 3
@@ -155,8 +165,9 @@ async def translate_policied(
         out, provider = await router.translate(
             masked, prompt + strict_suffix(leaks), force=provider
         )
-        if not _sane(out):
-            raise AllProvidersDown("unstable output after repair")
+        problem = _problem(out)
+        if problem:
+            raise AllProvidersDown(f"unstable output after repair ({problem})")
         rendered = render(out, dst, policy)
         leaks = deny_scan(rendered, dst, policy)
         if leaks:

@@ -208,6 +208,54 @@ def _dominant_script(text: str) -> str:
     return max(counts, key=lambda k: counts[k])
 
 
+# Target language -> the script its output is written in.
+_SCRIPT_FOR_LANG = {"my": "myanmar", "en": "latin", "zh": "cjk"}
+
+
+def script_ok(output: str, dst: str, min_chars: int = 3) -> bool:
+    """Layer 2b sanity: the answer must be written in the TARGET script.
+
+    Neither existing guard catches a provider that answers a Myanmar request
+    in English: `ratio_ok` only compares lengths (latin -> latin sits inside
+    the default 0.3-3.0 band) and `deny_scan` only knows the target
+    language's vocabulary. The result was an all-English reply shipped under
+    a "EN -> MY" header - staff would paste English back to a Burmese
+    speaking customer.
+
+    Deliberately narrow: it fails only when the expected script is ENTIRELY
+    absent, so an answer built mostly from proper nouns ("Facebook ပါ")
+    still ships, and a mixed Burmese/English reply still ships. Fewer than
+    *min_chars* script-bearing characters is too little to judge (a
+    translation of a bare ID is just the ID) and passes.
+
+    A failure is treated exactly like a bad ratio or a meta response: one
+    retry, then the translation is not delivered.
+    """
+    expected = _SCRIPT_FOR_LANG.get(dst)
+    if expected is None:
+        return True  # unknown/auto target: nothing to assert
+
+    from .langdetect import script_of
+
+    # Placeholders carry Latin letters in their own names ("user_id", "url"),
+    # and they are rendered into the target language afterwards - counting
+    # them would fail an answer that is nothing but a placeholder.
+    output = ENTITY_RE.sub("", PLACEHOLDER_RE.sub("", output))
+
+    counts: dict[str, int] = {}
+    for ch in output:
+        if ch.isspace():
+            continue
+        s = script_of(ch)
+        if s == "other":
+            continue
+        counts[s] = counts.get(s, 0) + 1
+
+    if sum(counts.values()) < min_chars:
+        return True
+    return counts.get(expected, 0) > 0
+
+
 def ratio_ok(source: str, output: str, src: str = "auto", dst: str = "en") -> bool:
     """Length sanity check with script-aware bands.
 

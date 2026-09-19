@@ -35,7 +35,7 @@ from aiogram.types import (
 
 from . import strings
 from .. import config as configmod
-from .groupgate import drop_cached_verdict, is_group_member
+from .groupgate import status_of, drop_cached_verdict, is_group_member
 from ..services.pipeline import Services, run_translation
 
 log = logging.getLogger("opstranslate.handlers")
@@ -273,26 +273,68 @@ def setup(router_services: Services, dp) -> None:
 # Membership changes: keep the gate cache honest
 # ---------------------------------------------------------------------------
 
-@router.my_chat_member()
-async def on_membership_change(
+@router.chat_member()
+async def on_group_membership_change(
     event: ChatMemberUpdated, services: Services
 ) -> None:
-    """A user joined or left the GP: drop their cached verdict at once.
+    """A user joined or left the GP: drop THEIR cached verdict at once.
 
-    Bot must be admin in the group for these events to arrive. Joins take
-    effect on the next message even without this (deny TTL is 5 min), but
-    a kick must lock the door immediately - not after the 6h allow cache
-    expires. Failures here must never break event handling.
+    `chat_member` updates describe OTHER users and need both the bot to be
+    admin in the group and "chat_member" in allowed_updates (see
+    main.ALLOWED_UPDATES). The subject is `event.new_chat_member.user`;
+    `event.from_user` is the admin who made the change, so invalidating
+    from_user would drop the wrong person's verdict.
+
+    A kick must lock the door immediately - not after the 6h allow cache
+    expires - and a join must open it immediately, not after the 5-minute
+    deny TTL. Dropping the verdict costs one getChatMember on the next
+    message. Failures here must never break event handling.
     """
     try:
         if not configmod.GROUP_CHAT_ID:
             return
         if event.chat.id != configmod.GROUP_CHAT_ID:
             return
-        new_status = str(getattr(event.new_chat_member, "status", "") or "")
-        if new_status.lower() in ("left", "kicked"):
-            await drop_cached_verdict(services.cache, event.from_user.id)
-            log.info("verdict_dropped user=%s status=%s",
-                     event.from_user.id, new_status)
+        new_member = getattr(event, "new_chat_member", None)
+        subject = getattr(new_member, "user", None)
+        if subject is None:
+            return
+        await drop_cached_verdict(services.cache, subject.id)
+        log.info("verdict_dropped user=%s status=%s",
+                 subject.id, status_of(new_member))
     except Exception:  # noqa: BLE001 - bookkeeping must never raise
-        pass
+        log.warning("verdict_drop_failed", exc_info=True)
+
+
+@router.my_chat_member()
+async def on_bot_membership_change(
+    event: ChatMemberUpdated, services: Services
+) -> None:
+    """The BOT's own membership changed (this is all `my_chat_member` sees).
+
+    If the bot loses the group, getChatMember fails for everyone and the
+    gate fails closed - the bot goes silent for every non-allowlisted
+    member. That must be loud rather than silent, so it raises a P2 alert
+    and resolves it when the bot is back.
+    """
+    try:
+        if not configmod.GROUP_CHAT_ID:
+            return
+        if event.chat.id != configmod.GROUP_CHAT_ID:
+            return
+        status = status_of(getattr(event, "new_chat_member", None))
+        if status in ("left", "kicked"):
+            log.error("bot_removed_from_group status=%s", status)
+            await services.alerts.send(
+                "P2", "GROUP_GATE_UNAVAILABLE", "group",
+                f"Bot is no longer in the ops group (status: {status}); "
+                "membership checks fail closed for every non-allowlisted user.",
+                "Re-add the bot to the group as an admin.",
+            )
+        elif status in ("member", "administrator", "creator"):
+            await services.alerts.resolve(
+                "GROUP_GATE_UNAVAILABLE", "group",
+                "Bot is back in the ops group; membership checks restored.",
+            )
+    except Exception:  # noqa: BLE001 - bookkeeping must never raise
+        log.warning("bot_membership_handler_failed", exc_info=True)

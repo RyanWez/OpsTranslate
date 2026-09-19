@@ -11,6 +11,7 @@ from app.policy.policy import (
     ratio_ok,
     render,
     restore_entities,
+    script_ok,
 )
 
 
@@ -140,3 +141,26 @@ def test_myanmar_id_transliteration_variants(policy):
     # Both must mask as user_id (longest-match-first, no orphan fragment).
     assert mask("ဂိမ်းအိုင်ဒီ မှားနေတယ်", "my", policy) == "⟦T:user_id⟧ မှားနေတယ်"
     assert mask("ဂိမ်းအိုက်ဒီ မှားနေတယ်", "my", policy) == "⟦T:user_id⟧ မှားနေတယ်"
+
+
+def test_script_ok_requires_the_target_script():
+    # The guard exists for one failure: a provider answering a Myanmar
+    # request in English, which the ratio check and the deny scan both miss.
+    assert script_ok("ပမာဏ လွှဲပေးပါ", "my")
+    assert script_ok("The Amount was sent", "en")
+    assert script_ok("金额已转", "zh")
+
+    assert not script_ok("The Amount was sent", "my")
+    assert not script_ok("send chips now", "my")
+    assert not script_ok("The amount was sent", "zh")
+
+
+def test_script_ok_tolerates_proper_nouns_and_placeholders():
+    # Narrow on purpose: reject only when the target script is ENTIRELY
+    # absent, so real answers are never withheld over a brand name.
+    assert script_ok("Facebook ပါ", "my")            # proper noun + particles
+    assert script_ok("⟦T:user_id⟧", "my")           # placeholder only
+    assert script_ok("⟦E:id:1⟧", "my")              # entity only
+    assert script_ok("⟦T:user_id⟧ ကို စစ်ပေးပါ", "my")
+    assert script_ok("12 34", "my")                  # no letters to judge
+    assert script_ok("anything at all", "auto")      # unknown target

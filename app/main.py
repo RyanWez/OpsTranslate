@@ -46,6 +46,12 @@ log = logging.getLogger("opstranslate.main")
 YANGON = ZoneInfo("Asia/Yangon")
 WORK_START_HOUR, WORK_END_HOUR = 8, 22
 
+# "chat_member" delivers OTHER users' join/leave events in the GP and is what
+# lets the group gate invalidate a cached verdict the moment a member is
+# kicked. Telegram only sends it when the bot is a group admin AND the update
+# type is listed here, so it must stay in both the polling and webhook lists.
+ALLOWED_UPDATES = ["message", "callback_query", "chat_member", "my_chat_member"]
+
 
 def build_services(bot: Bot) -> Services:
     policy = compile_policy(config.POLICY_VERSION)
@@ -108,10 +114,7 @@ async def lifespan(app: FastAPI):
 
         async def _poll():
             log.info("starting polling mode")
-            await dp.start_polling(
-                bot,
-                allowed_updates=["message", "callback_query", "my_chat_member"],
-            )
+            await dp.start_polling(bot, allowed_updates=ALLOWED_UPDATES)
 
         polling_task = asyncio.create_task(_poll())
     elif config.MODE == "webhook":
@@ -121,7 +124,7 @@ async def lifespan(app: FastAPI):
             await bot.set_webhook(
                 url,
                 secret_token=config.WEBHOOK_SECRET or None,
-                allowed_updates=["message", "callback_query", "my_chat_member"],
+                allowed_updates=ALLOWED_UPDATES,
                 drop_pending_updates=True,
             )
             log.info("webhook registered")

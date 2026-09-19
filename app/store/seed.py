@@ -33,25 +33,12 @@ from .models import (
     TermOutput,
     TermVariant,
 )
+from ..policy.governance import regression_report
 from ..policy.policy import build_system_prompt, compile_policy
 from ..policy.policy_data import CONCEPTS, DENY_TERMS
+from ..policy.regression_set import REGRESSION_SET
 
 log = logging.getLogger("opstranslate.seed")
-
-# Starter regression cases: (src, dst, input, must_contain, must_not_contain).
-# These run against mask/render/deny-scan only - no provider needed.
-REGRESSION_SEED: list[tuple[str, str, str, str, str]] = [
-    ("my", "en", "ဂိမ်းအိုင်ဒီ မှားနေတယ်", "User ID", "ဂိမ်း"),
-    ("my", "en", "ပွိုင့်တွေ ဘယ်လိုလွှဲမလဲ", "Balance", "ဂိမ်း"),
-    ("en", "en", "my game id is wrong", "User ID", "game id"),
-    ("en", "my", "check my game points", "လက်ကျန်", "game"),
-    ("zh", "en", "游戏里的积分怎么转", "balance", "游戏"),
-    ("zh", "en", "游戏账号不对", "User Account", "游戏"),
-    ("en", "en", "transfer my points to 0912345678", "Balance", "points"),
-    ("my", "en", "ဂိမ်းထဲက အကောင့်ပြန်ဖွင့်ပေးပါ", "Platform", "ဂိမ်း"),
-    ("en", "en", "GAMER points balance", "Balance", "gamer"),
-    ("en", "en", "checkpoint reached", "checkpoint", "Balance"),
-]
 
 
 async def seed() -> None:
@@ -87,7 +74,15 @@ async def seed() -> None:
             )
         ).scalar_one_or_none()
         if pv is None:
-            pv = PolicyVersion(version=version, status="published", note="seeded v1")
+            # Spec 4.5: a version cannot be published unless the whole
+            # regression set passes. A failing set seeds as draft instead.
+            report = regression_report(version)
+            status = "published" if report.ok else "draft"
+            note = f"seeded v{version} - {report.summary()}"
+            if not report.ok:
+                log.error("policy v%d NOT publishable: %s", version,
+                          report.failures)
+            pv = PolicyVersion(version=version, status=status, note=note)
             sess.add(pv)
             await sess.flush()
 
@@ -118,12 +113,14 @@ async def seed() -> None:
                 for term in terms:
                     sess.add(DenyTerm(policy_version=version, lang=lang, term=term))
 
-            for src, dst, text, contains, not_contains in REGRESSION_SEED:
+            # The same 40 cases pytest runs (app/policy/regression_set.py).
+            for case in REGRESSION_SET:
                 sess.add(
                     PolicyTest(
-                        policy_version=version, src_lang=src, dst_lang=dst,
-                        input_text=text, expected_contains=contains,
-                        must_not_contain=not_contains,
+                        policy_version=version, src_lang=case.src,
+                        dst_lang=case.dst, input_text=case.text,
+                        expected_contains=case.must_contain,
+                        must_not_contain=case.must_not_contain,
                     )
                 )
             log.info("seeded policy v%d", version)
