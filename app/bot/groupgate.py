@@ -39,6 +39,20 @@ log = logging.getLogger("opstranslate.groupgate")
 _MEMBER_STATUSES = ("creator", "owner", "administrator", "member")
 
 
+def status_of(member) -> str:
+    """Normalise a ChatMember.status to a plain lowercase string.
+
+    aiogram returns ChatMemberStatus, a str-mixed Enum whose ``str()`` is
+    ``'ChatMemberStatus.MEMBER'`` and NOT ``'member'``. Reading the status
+    with str() therefore matches nothing and sends every real member down
+    the deny path - the gate would reject the entire group. Resolve the
+    enum's value first, and still accept the plain strings tests use.
+    """
+    raw = getattr(member, "status", "") or ""
+    value = getattr(raw, "value", None)
+    return str(value if value is not None else raw).strip().lower()
+
+
 def _cache_key(group_id: int, user_id: int) -> str:
     return f"grp:{group_id}:{user_id}"
 
@@ -109,7 +123,7 @@ async def is_group_member(
 
     try:
         member = await bot.get_chat_member(chat_id=group_id, user_id=user_id)
-        status = str(getattr(member, "status", "") or "").lower()
+        status = status_of(member)
     except Exception as exc:  # noqa: BLE001 - fail closed unless stale cache
         log.warning("group_lookup_failed user=%s: %s", user_id, exc)
         if cached_decision is not None:
