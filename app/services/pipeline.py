@@ -61,6 +61,10 @@ from .stats import Stats
 
 log = logging.getLogger("opstranslate.pipeline")
 
+# Spec SHOULD 16 says 12 s. Live provider's first reasoning-heavy request
+# takes ~11 s, so 12 s would turn most translations into ERROR_GENERIC.
+# 60 s is kept as documented deviation (see README Spec deviations) and is
+# the binding limit; PROVIDER_TIMEOUT_S (8 s) fires first per-provider call.
 HANDLER_BUDGET_S = 60.0
 
 
@@ -98,6 +102,12 @@ def copy_keyboard(result_text: str) -> InlineKeyboardMarkup:
 
 
 def lang_buttons() -> InlineKeyboardMarkup:
+    """Legacy language buttons (v3.2 auto toggle removed the picker).
+
+    Kept for the stored-target fallback and so that old messages that still
+    carry the markup do not break. New callers should not invoke this;
+    direction is automatic via resolve_toggle_dst().
+    """
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -129,11 +139,52 @@ async def translate_policied(
 ) -> tuple[str, str, dict]:
     """Run mask -> provider -> render -> deny-scan -> repair.
 
+    Policy is asymmetric now (user request 2026-09-20):
+      * Myanmar -> EN : full policy (mask my variants, render en neutral,
+        deny-scan en). Gaming slang is neutralised only when translating
+        OUT of Myanmar.
+      * Global -> MY : relaxed (no mask, no render, no deny). Any language
+        to Myanmar is a literal, natural translation so Game Point can stay
+        as ဂိမ်းပွိုင့် etc. Only the generic sanity checks (ratio, meta,
+        script) still apply.
+
     Returns (final_text, provider_name, meta). Raises PolicyRefusal when the
     deny-scan still fires after one repair attempt - the translation is then
     withheld, never shipped.
     """
     protected, restore = protect_entities(normalise(text))
+
+    # -- Relaxed path: Global -> Myanmar (dst == "my") --------------------
+    # No term-policy, no deny list. The model translates literally and
+    # naturally; staff-to-staff chat tone is carried by the prompt.
+    if dst == "my":
+        prompt = build_system_prompt(src, dst, policy)
+        out, provider = await router.translate(protected, prompt)
+
+        def _problem_relaxed(o: str) -> str | None:
+            if not ratio_ok(text, o, src=src, dst=dst):
+                return "length ratio"
+            if is_meta_response(o):
+                return "meta response"
+            if not script_ok(o, dst):
+                return f"wrong script for {dst}"
+            return None
+
+        problem = _problem_relaxed(out)
+        if problem:
+            out, provider = await router.translate(protected, prompt, force=provider)
+            problem = _problem_relaxed(out)
+            if problem:
+                raise AllProvidersDown(f"unstable output ({problem})")
+
+        final = restore_entities(out, restore)
+        return final, provider, {
+            "policy_hits": [],
+            "deny_hits": 0,
+            "ratio": round(len(final) / max(len(text), 1), 2),
+        }
+
+    # -- Full policy path: Myanmar -> EN (and en->en / zh->en etc.) -------
     masked = mask(protected, src, policy)
     prompt = build_system_prompt(src, dst, policy)
 
@@ -335,17 +386,19 @@ def _text_hash(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 def resolve_toggle_dst(src: str, dst: str) -> str:
-    """Auto EN<->MM toggle (owner request 2026-09-19).
+    """Global => Myanmar | Myanmar => EN (2026-09-20).
 
-    Myanmar input -> English output; English input -> Myanmar output.
-    "auto" (uncertain/mixed input) keeps the caller's dst, which is the
-    user's stored target (default English).
+    The product direction is now: Myanmar input always goes to English
+    (with full term-policy), everything else (English, auto, Chinese,
+    Thai, any global language the model knows) always goes to Myanmar
+    (relaxed, literal, natural). This replaces the old EN<->MY toggle.
+    The stored user target is kept only as a fallback for the rare
+    case src == "my" is uncertain, but my->en / non-my->my is the
+    canonical rule.
     """
     if src == "my":
         return "en"
-    if src == "en":
-        return "my"
-    return dst
+    return "my"
 
 
 async def run_translation(
@@ -379,26 +432,21 @@ async def run_translation(
         )
         return
 
-    # -- Gate 6: language ----------------------------------------------------
+    # -- Gate 6: language + Global=>MY direction (2026-09-20) -------------
+    # Myanmar -> EN (with policy), everything else (en, auto, Chinese,
+    # Thai, etc.) -> MY (relaxed). We no longer reject confident CJK/Thai;
+    # any global language the model knows is translated to Myanmar literally.
     src, confidence, oos_name = detect(raw_text)
     if oos_name is not None:
-        await services.bot.send_message(
-            chat_id,
-            strings.UNSUPPORTED_LANG.format(lang=oos_name),
-            reply_parameters=ReplyParameters(
-                message_id=anchor_message_id, allow_sending_without_reply=True
-            ),
-        )
-        await log_usage(
-            services, user_id=user_id, src_lang=src, dst_lang=dst,
-            char_len=len(raw_text), status="unsupported_lang",
-            policy_version=services.policy.version,
-        )
-        return
+        # Treat the out-of-scope script as a global language input.
+        # Keep src != "my" so the toggle routes it to Myanmar.
+        src = "auto"
+        # Purposely do NOT return UNSUPPORTED_LANG - translate to MY instead.
 
-    # -- Auto EN<->MM toggle --------------------------------------------------
-    if config.AUTO_TOGGLE and oos_name is None:
-        dst = resolve_toggle_dst(src, dst)
+    # Global => Myanmar | Myanmar => EN (always, regardless of AUTO_TOGGLE
+    # stored target; AUTO_TOGGLE remains for backward compat but the new
+    # canonical rule is my->en / non-my->my).
+    dst = resolve_toggle_dst(src, dst)
 
     # -- Gate 7: duplicate ---------------------------------------------------
     dup = duplicate_key(user_id, raw_text, dst)
@@ -443,6 +491,12 @@ async def run_translation(
                     message_id=anchor_message_id, allow_sending_without_reply=True
                 ),
             )
+            await log_usage(
+                services, user_id=user_id, src_lang=src, dst_lang=dst,
+                text_hash=_text_hash(raw_text), char_len=len(raw_text),
+                cache_hit=False, status="daily_cap",
+                policy_version=services.policy.version, error_code="daily_cap_reached",
+            )
             return
 
         # -- Gate 9: cache ---------------------------------------------------
@@ -470,6 +524,12 @@ async def run_translation(
                 "Raise the cap in settings or wait for tomorrow.",
             )
             await _edit_error(services, chat_id, placeholder_id, strings.SPEND_CAP_REACHED)
+            await log_usage(
+                services, user_id=user_id, src_lang=src, dst_lang=dst,
+                text_hash=_text_hash(raw_text), char_len=len(raw_text),
+                cache_hit=False, status="spend_cap",
+                policy_version=services.policy.version, error_code="spend_cap_reached",
+            )
             return
 
         # Animated dots keep the placeholder alive while the provider
@@ -532,6 +592,30 @@ async def run_translation(
             services.stats.record_failure()
             await _stop_animation()
             await _edit_error(services, chat_id, placeholder_id, strings.ERROR_GENERIC)
+            await log_usage(
+                services, user_id=user_id, src_lang=src, dst_lang=dst,
+                text_hash=_text_hash(raw_text), char_len=len(raw_text),
+                cache_hit=False, status="handler_timeout",
+                policy_version=services.policy.version, error_code="handler_budget_exceeded",
+            )
+            return
+        except Exception as exc:  # noqa: BLE001 - policy engine or unexpected error
+            services.stats.record_failure()
+            services.stats.record_policy_engine_error()
+            await _stop_animation()
+            log.warning("pipeline_unexpected_error: %s", exc)
+            await services.alerts.send(
+                "P1", "POLICY_ENGINE_ERROR", "pipeline",
+                f"Pipeline error: {type(exc).__name__}",
+                "Check policy data and provider output; error is per-message.",
+            )
+            await _edit_error(services, chat_id, placeholder_id, strings.ERROR_GENERIC)
+            await log_usage(
+                services, user_id=user_id, src_lang=src, dst_lang=dst,
+                text_hash=_text_hash(raw_text), char_len=len(raw_text),
+                cache_hit=False, status="pipeline_error",
+                policy_version=services.policy.version, error_code=type(exc).__name__,
+            )
             return
 
         await _stop_animation()

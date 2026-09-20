@@ -76,13 +76,17 @@ def _ttl_for(decision: bool) -> int:
 
 
 async def is_group_member(
-    bot, cache, user_id: int, start_cmd: bool = False
+    bot, cache, user_id: int, start_cmd: bool = False, user_store=None
 ) -> tuple[bool, str]:
     """Return (allowed, reason). Never raises - errors resolve to a verdict.
 
     start_cmd=True forces a fresh Telegram lookup (used by /start so a
     freshly added member never waits out a cached deny), then updates the
     cache with the new verdict.
+
+    user_store: when given, the hot path reuses the Services-scoped
+    UserStore (which has a 60 s memo) instead of constructing a fresh
+    instance per call and hitting Postgres every time.
 
     Reasons: test_mode | no_group_config | allowlist | member:<status> |
     non_member:<status> | stale_allow | stale_deny |
@@ -94,14 +98,15 @@ async def is_group_member(
         return True, "test_mode"
 
     group_id = config.GROUP_CHAT_ID
+    store = user_store if user_store is not None else UserStore()
     if not group_id:
         # Gate not configured: the static allowlist is the only control.
-        allowed, role = await UserStore().is_allowed(user_id)
+        allowed, role = await store.is_allowed(user_id)
         return allowed, f"no_group_config:{role}"
 
     # Admin override first: static staff/admin survive a group kick so the
     # owner is never locked out by a membership mistake.
-    allowed, _ = await UserStore().is_allowed(user_id)
+    allowed, _ = await store.is_allowed(user_id)
     if allowed:
         return True, "allowlist"
 
