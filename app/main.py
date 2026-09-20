@@ -168,6 +168,16 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="OpsTranslate Bot", lifespan=lifespan)
 
 
+@app.get("/")
+async def root():
+    return {
+        "status": "ok",
+        "app": "OpsTranslate Bot",
+        "mode": config.MODE,
+        "health": "/healthz",
+    }
+
+
 @app.post("/webhook/{path_secret}")
 async def webhook(
     path_secret: str,

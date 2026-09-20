@@ -19,6 +19,17 @@ Optional:
 from __future__ import annotations
 
 import os
+from pathlib import Path
+
+try:
+    from dotenv import find_dotenv, load_dotenv
+
+    _env_file = find_dotenv(usecwd=True)
+    if _env_file:
+        load_dotenv(_env_file, override=False)
+except ImportError:
+    pass
+
 
 
 def get(name: str, default: str = "") -> str:
