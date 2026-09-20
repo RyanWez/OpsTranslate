@@ -91,13 +91,17 @@ class AllProvidersDown(ProviderError):
 
 
 class ProviderRouter:
-    def __init__(self, providers: list[Provider], max_concurrency: int = 8):
+    def __init__(self, providers: list[Provider], max_concurrency: int = 8, alerts=None):
         self.providers = sorted(
             [p for p in providers if p.enabled], key=lambda p: p.priority
         )
         self.breakers: dict[str, _Breaker] = {p.name: _Breaker() for p in self.providers}
         self.semaphore = asyncio.Semaphore(max_concurrency)
         self._client: httpx.AsyncClient | None = None
+        self._alerts = alerts
+
+    def bind_alerts(self, alerts) -> None:
+        self._alerts = alerts
 
     async def _client_get(self) -> httpx.AsyncClient:
         if self._client is None:
@@ -140,6 +144,8 @@ class ProviderRouter:
             breaker = self.breakers[provider.name]
             if not breaker.can_try(now):
                 continue
+            # Snapshot for resolve detection
+            prev_state = breaker.state
             async with self.semaphore:
                 try:
                     text = await self._call(provider, masked_text, system_prompt)
@@ -149,8 +155,36 @@ class ProviderRouter:
                     log.warning("provider_failed", extra={"provider": provider.name})
                     if opened:
                         log.error("circuit_opened", extra={"provider": provider.name})
+                        if self._alerts:
+                            try:
+                                await self._alerts.send(
+                                    "P2",
+                                    "PROVIDER_CIRCUIT_OPEN",
+                                    provider.name,
+                                    f"Circuit opened for {provider.name} after {FAIL_THRESHOLD} consecutive failures.",
+                                    "Check provider status/API key, or wait 60s for half-open retry.",
+                                )
+                            except Exception:  # noqa: BLE001
+                                log.warning("circuit_open_alert_failed", exc_info=True)
                     continue
+                # success: check if we just closed a previously open circuit
+                was_open = prev_state in ("open", "half_open")
                 breaker.record_success()
+                if was_open and self._alerts:
+                    try:
+                        await self._alerts.resolve(
+                            "PROVIDER_CIRCUIT_OPEN",
+                            provider.name,
+                            f"Circuit closed for {provider.name}; provider recovered.",
+                        )
+                        # Also resolve the global outage if at least one provider is now healthy
+                        await self._alerts.resolve(
+                            "PROVIDER_OUTAGE",
+                            "all",
+                            f"At least one provider ({provider.name}) recovered; translations resumed.",
+                        )
+                    except Exception:  # noqa: BLE001
+                        log.warning("circuit_resolve_failed", exc_info=True)
                 return text, provider.name
 
         raise AllProvidersDown("; ".join(errors) or "no providers configured")

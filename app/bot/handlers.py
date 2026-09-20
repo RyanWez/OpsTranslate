@@ -73,12 +73,16 @@ async def _gate_access(
     Non-members get NOTHING (silent drop). TEST_ALLOW_ALL=true bypasses
     everything for local tests. start_cmd=True forces a fresh Telegram
     lookup so /start works the moment a user joins the group.
+
+    Uses the Services-scoped UserStore so the hot path benefits from the
+    60 s allowlist memo (P1.4) instead of constructing a fresh UserStore
+    per message and hitting Postgres every time.
     """
     if not _is_private(message):
         return False
     allowed, reason = await is_group_member(
         services.bot, services.cache, message.from_user.id,
-        start_cmd=start_cmd,
+        start_cmd=start_cmd, user_store=services.user_store,
     )
     if not allowed:
         log.info("access_denied user=%s reason=%s", message.from_user.id, reason)
@@ -121,6 +125,23 @@ async def cmd_whoami(message: Message, services: Services) -> None:
     if not _is_private(message):
         return
     await message.answer(f"Your Telegram user ID: {message.from_user.id}")
+    # P3: a /whoami from a non-member is the onboarding signal. Alert so
+    # staff notice without polling the logs, but never include message text.
+    try:
+        allowed, _ = await is_group_member(
+            services.bot, services.cache, message.from_user.id,
+            user_store=services.user_store,
+        )
+        if not allowed:
+            await services.alerts.send(
+                "P3",
+                "UNKNOWN_WHOAMI",
+                "onboarding",
+                f"Unknown user requested /whoami: id={message.from_user.id}",
+                "Add to allowlist or invite to the ops group if legitimate.",
+            )
+    except Exception:  # noqa: BLE001 - alert must never break the command
+        log.warning("whoami_alert_failed", exc_info=True)
 
 
 @router.message(Command("status"))
@@ -201,7 +222,8 @@ async def cb_lang(call: CallbackQuery, services: Services) -> None:
     # Buttons only exist on the bot's own private-chat messages, but verify
     # anyway: dismiss the spinner silently for outsiders, change nothing.
     allowed, _ = await is_group_member(
-        services.bot, services.cache, call.from_user.id
+        services.bot, services.cache, call.from_user.id,
+        user_store=services.user_store,
     )
     if not allowed:
         await call.answer()

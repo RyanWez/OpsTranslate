@@ -19,15 +19,17 @@ against every provider before it goes live.
 
 Adding a case: append a RegressionCase. Keep the coverage matrix below true.
 
-Coverage matrix (40 cases):
+Coverage matrix (40 cases) - v2026-09-20 relaxed Global->MY:
   concept     user_id  user_account  balance  platform  member
-  my -> en        5          2          3        2        1
-  en -> my        2          1          3        1        2
-  en -> en        1          2          3        1        1
-  zh -> en        1          1          1        1        1
-  mixed (auto)    2          0          1        0        0
+  my -> en        5          2          3        2        1   (full policy)
+  en -> my        2          1          3        1        2   (relaxed: literal, no mask)
+  en -> en        1          2          3        1        1   (full policy - neutralised)
+  zh -> en        1          1          1        1        1   (full policy)
+  mixed (auto)    2          0          1        0        0   (my->en policied, *->my relaxed)
   entities/evasion/traps: 7 (URL, mention, number, /command, zero-width x2,
                             word-boundary)
+  Note: en->my and auto->my are now relaxed (dst==my bypasses mask/render/deny)
+  so Game Point stays as ဂိမ်းပွိုင့် etc. for Myanmar output.
 """
 from __future__ import annotations
 
@@ -119,35 +121,35 @@ REGRESSION_SET: list[RegressionCase] = [
     # -- en -> my ---------------------------------------------------------
     RegressionCase(
         "en_my_user_id", "en", "my", "my game id is wrong",
-        "အသုံးပြုသူ ID", "game id",
+        "game id", "အသုံးပြုသူ ID", "relaxed Global->MY: literal, no mask",
     ),
     RegressionCase(
         "en_my_account", "en", "my", "check my game account",
-        "အသုံးပြုသူ အကောင့်", "game account",
+        "game account", "အသုံးပြုသူ အကောင့်", "relaxed: literal",
     ),
     RegressionCase(
         "en_my_points", "en", "my", "how do I transfer my game points",
-        "ပမာဏ", "game points", "owner term choice 2026-09-19: ပမာဏ",
+        "game points", "ပမာဏ", "relaxed Global->MY: literal, Game Point stays",
     ),
     RegressionCase(
         "en_my_chips", "en", "my", "the chips were not credited",
-        "ပမာဏ", "chips", "slang variant folds into balance",
+        "chips", "ပမာဏ", "relaxed: literal",
     ),
     RegressionCase(
         "en_my_member", "en", "my", "the player is complaining",
-        "ဖောက်သည်", "player", "member approved 2026-09-19",
+        "player", "ဖောက်သည်", "relaxed: literal",
     ),
     RegressionCase(
         "en_my_platform", "en", "my", "in-game items are missing",
-        "ပလက်ဖောင်း", "in-game",
+        "in-game", "ပလက်ဖောင်း", "relaxed: literal",
     ),
     RegressionCase(
         "en_my_gid_with_number", "en", "my", "gid 12345 not found",
-        "အသုံးပြုသူ ID", "gid", "short alias + protected number",
+        "gid", "အသုံးပြုသူ ID", "relaxed: literal, number survives",
     ),
     RegressionCase(
         "en_my_command_entity", "en", "my", "/tr game points now",
-        "ပမာဏ", "game points", "leading /command is a protected entity",
+        "game points", "ပမာဏ", "relaxed: literal, /command protected",
     ),
     # -- en -> en (vocabulary neutralised without a language change) ------
     RegressionCase(
@@ -214,7 +216,7 @@ REGRESSION_SET: list[RegressionCase] = [
     ),
     RegressionCase(
         "auto_my_mixed_points", "auto", "my", "please ပွိုင့် transfer လုပ်ပေးပါ",
-        "ပမာဏ", "ပွိုင့်", "Burmese + English in one message",
+        "ပွိုင့်", "ပမာဏ", "relaxed Global->MY: literal, no mask",
     ),
     # -- evasion and boundary traps --------------------------------------
     RegressionCase(
@@ -268,8 +270,15 @@ DENY_CASES: list[DenyCase] = [
 
 
 def evaluate(case: RegressionCase, policy: "Policy") -> str:
-    """Run the deterministic half of the pipeline and return the final text."""
+    """Run the deterministic half of the pipeline and return the final text.
+
+    Mirrors translate_policied: dst==my is relaxed (no mask/render), dst==en
+    is fully policied.
+    """
     protected, restore = protect_entities(normalise(case.text))
+    if case.dst == "my":
+        # Relaxed Global->MY: literal, no term-policy
+        return restore_entities(protected, restore)
     masked = mask(protected, case.src, policy)
     rendered = render(masked, case.dst, policy)
     return restore_entities(rendered, restore)
@@ -311,10 +320,16 @@ async def run_live(
     results: dict[str, list[str]] = {}
     for case in REGRESSION_SET:
         protected, restore = protect_entities(normalise(case.text))
-        masked = mask(protected, case.src, policy)
-        prompt = build_system_prompt(case.src, case.dst, policy)
-        out, _ = await router.translate(masked, prompt, force=provider_name)
-        final = restore_entities(render(out, case.dst, policy), restore)
+        if case.dst == "my":
+            masked = protected
+            prompt = build_system_prompt(case.src, case.dst, policy)
+            out, _ = await router.translate(masked, prompt, force=provider_name)
+            final = restore_entities(out, restore)
+        else:
+            masked = mask(protected, case.src, policy)
+            prompt = build_system_prompt(case.src, case.dst, policy)
+            out, _ = await router.translate(masked, prompt, force=provider_name)
+            final = restore_entities(render(out, case.dst, policy), restore)
         problems: list[str] = []
         if case.must_contain and case.must_contain not in final:
             problems.append(f"missing {case.must_contain!r}")

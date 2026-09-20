@@ -68,16 +68,22 @@ def build_services(bot: Bot) -> Services:
                 timeout_s=float(d.get("timeout_s", config.PROVIDER_TIMEOUT_S)),
             )
         )
+    alerts = AlertManager(config.ALERT_BOT_TOKEN, config.ADMIN_CHAT_ID)
+    cache = Cache(config.REDIS_URL, alerts=alerts)
     router = ProviderRouter(
         providers=providers,
         max_concurrency=config.PROVIDER_MAX_CONCURRENCY,
+        alerts=alerts,
     )
+    # Ensure cross-binding even if one was constructed before the other
+    cache.bind_alerts(alerts)
+    router.bind_alerts(alerts)
     services = Services(
         bot=bot,
         policy=policy,
         router=router,
-        cache=Cache(config.REDIS_URL),
-        alerts=AlertManager(config.ALERT_BOT_TOKEN, config.ADMIN_CHAT_ID),
+        cache=cache,
+        alerts=alerts,
         stats=Stats(),
         user_store=UserStore(),
     )
@@ -129,8 +135,27 @@ async def lifespan(app: FastAPI):
             )
             log.info("webhook registered")
 
+    # Watchdog for error rate / p95 / digest (P1.3)
+    watchdog_task = None
+    try:
+        import asyncio
+
+        from .services.watchdog import watchdog_loop
+
+        watchdog_task = asyncio.create_task(watchdog_loop(services))
+    except Exception:  # noqa: BLE001
+        log.warning("watchdog_start_failed", exc_info=True)
+
     yield
 
+    if watchdog_task is not None:
+        watchdog_task.cancel()
+        try:
+            import asyncio
+
+            await watchdog_task
+        except asyncio.CancelledError:
+            pass
     if polling_task is not None:
         polling_task.cancel()
     await services.router.close()
@@ -185,5 +210,38 @@ async def healthz():
         "provider": services.router.any_closed(),
         "traffic": traffic_ok,
     }
+    # P1.3: healthz is the observer for DB/cache - raise/resolve alerts here
+    # so a degraded infra is loud even if no translation is currently failing.
+    try:
+        if not checks["db"]:
+            await services.alerts.send(
+                "P1", "DB_UNREACHABLE", "db",
+                "Database ping failed (healthz).",
+                "Check Neon status, DATABASE_URL, and network.",
+            )
+        else:
+            await services.alerts.resolve("DB_UNREACHABLE", "db", "Database recovered (healthz).")
+        if not checks["cache"]:
+            await services.alerts.send(
+                "P1", "CACHE_UNREACHABLE", "redis",
+                "Cache ping failed (healthz).",
+                "Check Upstash/Redis status and REDIS_URL.",
+            )
+        else:
+            await services.alerts.resolve("CACHE_UNREACHABLE", "redis", "Cache recovered (healthz).")
+        # Provider health: healthz already reflects any_closed(); the
+        # router's circuit alerts cover the per-provider case, but a global
+        # outage seen here should also be loud if pipeline missed it.
+        if not checks["provider"]:
+            await services.alerts.send(
+                "P1", "PROVIDER_OUTAGE", "all",
+                "All providers are circuit-open (healthz).",
+                "Bot is serving cache-only.",
+            )
+        else:
+            await services.alerts.resolve("PROVIDER_OUTAGE", "all", "At least one provider is healthy (healthz).")
+    except Exception:  # noqa: BLE001
+        log.warning("healthz_alert_failed", exc_info=True)
+
     ok = all(checks.values())
     return JSONResponse(checks, status_code=200 if ok else 503)

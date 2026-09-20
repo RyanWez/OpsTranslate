@@ -4,7 +4,7 @@ Telegram translation bot with a **term-policy engine** (no free translation of
 sensitive gaming/ops terminology) and **entity protection** (URLs, @mentions,
 numbers and /commands pass through untouched).
 
-Scope: EN / MY / ZH <-> EN. This v1 ships **polling** (local testing) and
+Scope: MY ↔ EN (auto toggle; Chinese cut from scope in v3.2 — confident CJK is rejected with `UNSUPPORTED_LANG`). This v1 ships **polling** (local testing) and
 **webhook** (production) modes. No admin dashboard.
 
 ## Quick start (local polling test)
@@ -86,7 +86,7 @@ The schema logs **metadata only** (`usage_log` has no message-text column).
 - Usage logs contain metadata only - no message text, no translation text.
 - P1/P2 alerts never include message content (concept/provider/version only).
 
-## Spec deviations (from `opstranslte-bot-v3.1.html`)
+## Spec deviations (from `opstranslte-bot-v3.2.html`)
 
 - Placeholders use the spec's Unicode brackets: `⟦T:concept⟧` for
   term-policy, `⟦E:url:N⟧` / `⟦E:id:N⟧` / `⟦E:mention:N⟧` / `⟦E:cmd:N⟧` for
@@ -121,3 +121,9 @@ The schema logs **metadata only** (`usage_log` has no message-text column).
 - Delivery is final-only: the validated translation replaces the
   "Translating…" placeholder in one edit; no intermediate `…` partial frames
   are sent.
+- Handler budget is `HANDLER_BUDGET_S = 60s` (spec SHOULD 16 says 12s). The live provider's first reasoning-heavy request takes ~11s, so 12s would turn most translations into `ERROR_GENERIC`; 60s is kept as a documented deviation and remains the binding limit before `PROVIDER_TIMEOUT_S` (8s).
+- Wrong-script guard (`policy.script_ok`) is an addition beyond spec §08-03: if the target is Myanmar and the provider answers in pure Latin (or vice-versa) the answer is retried once then withheld as `unstable output (wrong script)` → `ERROR_GENERIC` + P1 `PROVIDER_OUTAGE`. Mixed-script answers (e.g. `Facebook ပါ`) still ship; placeholders are stripped before the check.
+- Fail-soft cache (P1.4): `check_idempotent`, `mark_inflight`, `get`, `put`, `incr`, `get_float`, `incr_float` all degrade to the in-memory `_MemoryStore` on Redis errors, counting consecutive failures and raising P1 `CACHE_UNREACHABLE` once (resolved on recovery). Correctness trade: in-memory idempotency is per-process, best-effort.
+- Hot-path DB removal (P1.4 §08-02): `is_allowed`, `get_target`, `daily_soft_cap` are memoized 60 s in-process via `UserStore` and `groupgate` reuses `services.user_store` instead of constructing a fresh `UserStore()` per message, so a steady-state message issues 0 Postgres queries after the first minute.
+- Alerting completion (P1.3 MUST 11): `PROVIDER_CIRCUIT_OPEN` (P2) on breaker open, `CACHE_UNREACHABLE`/`DB_UNREACHABLE` (P1) via cache `ping` and `/healthz`, watchdog every 60 s for `HIGH_ERROR_RATE` (>5 %/5 min, P2), `HIGH_P95_LATENCY` (>4 s, P2), `POLICY_ENGINE_ERROR_RATE` (>20 %, P1), P3 `DAILY_DIGEST` at 09:00 Asia/Yangon and P3 `UNKNOWN_WHOAMI` on `/whoami` from a non-member. Every alert resolves (`resolve()`) when the condition clears and never carries message text.
+- `AUTO_TOGGLE` (default `true`, see `.env.example`) implements v3.2 owner change: Myanmar input → English, English input → Myanmar, `auto` keeps the stored target.

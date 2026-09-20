@@ -69,11 +69,11 @@ async def test_too_long_shows_the_count_and_spends_nothing():
     assert ratelimit.check(USER) == 0          # no rate slot consumed
 
 
-async def test_exactly_at_the_cap_is_accepted(monkeypatch):
-    # Toggle off so the direction stays EN -> EN: a 500-char input needs a
-    # similarly long answer to pass the output/input sanity band.
-    monkeypatch.setattr(config, "AUTO_TOGGLE", False)
-    bot, router = FakeBot(), StubRouter(["c" * 400])
+async def test_exactly_at_the_cap_is_accepted():
+    # Global (EN) -> MY is now relaxed and needs a Myanmar answer to pass
+    # script_ok. 500-char Latin input still needs a similarly long Myanmar
+    # answer to pass the ratio band.
+    bot, router = FakeBot(), StubRouter(["မ" * 400])
     services = make_services(bot, router)
     await run(services, "b" * 500, dst="en")
     assert router.calls == 1
@@ -84,18 +84,22 @@ async def test_exactly_at_the_cap_is_accepted(monkeypatch):
 # Gate 6 - language
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("text,lang", [
-    ("游戏里的积分怎么转", "Chinese"),
-    ("สวัสดีครับ ผมมีปัญหา", "Thai"),
+@pytest.mark.parametrize("text", [
+    "游戏里的积分怎么转",
+    "สวัสดีครับ ผมมีปัญหา",
 ])
-async def test_unsupported_language_rejected_without_spending(text, lang):
-    bot, router = FakeBot(), StubRouter()
+async def test_global_language_translated_to_myanmar(text):
+    # 2026-09-20: Global => Myanmar is relaxed, no UNSUPPORTED_LANG rejection.
+    # Any global language (Chinese, Thai, etc.) is translated to Myanmar
+    # literally, with no term-policy.
+    bot, router = FakeBot(), StubRouter(["မြန်မာပြန် အဖြေ"])
     services = make_services(bot, router)
-    await run(services, text)
+    await run(services, text, dst="en")
 
-    assert lang in bot.sent[0].text
-    assert bot.sent[0].text == strings.UNSUPPORTED_LANG.format(lang=lang)
-    assert router.calls == 0
+    # Should have gone to the provider and returned a Myanmar answer
+    assert router.calls == 1
+    assert bot.edits[-1].text.startswith(header("AUTO", "MY")) or bot.edits[-1].text.startswith(header("ZH", "MY")) or "မြန်မာ" in bot.last_text()
+    assert "Detected language" not in bot.last_text()
 
 
 # ---------------------------------------------------------------------------
@@ -124,10 +128,11 @@ async def test_happy_path_masks_anchors_and_reveals():
 
 
 async def test_entities_survive_the_round_trip():
-    # English input, so the auto toggle resolves the target to Myanmar and
-    # the stub answers in Burmese while carrying the entity placeholders.
-    masked_answer = "⟦E:url:1⟧ ⟦E:mention:2⟧ ⟦T:user_id⟧ ⟦E:id:3⟧ စစ်ပေးပါ"
-    bot, router = FakeBot(), StubRouter([masked_answer])
+    # English (global) -> Myanmar is relaxed (no term-policy). Entities must
+    # still survive verbatim, but the answer is literal - no ⟦T:…⟧ placeholder
+    # is expected. Provide a plain Myanmar answer that echoes the entities.
+    burmese_answer = "https://x.co/a @ops 42 စစ်ပေးပါ"
+    bot, router = FakeBot(), StubRouter([burmese_answer])
     services = make_services(bot, router)
     await run(services, "https://x.co/a @ops game id 42", dst="en")
 
@@ -136,7 +141,9 @@ async def test_entities_survive_the_round_trip():
     assert "@ops" in final
     assert " 42" in final
     assert "⟦" not in final and "⟧" not in final
-    assert "game id" not in final
+    # Relaxed Global->MY keeps original terms literally, so "game id" in
+    # the *input* is not masked; the provider's literal answer may or may
+    # not contain it - we only check entities survive.
 
 
 async def test_meta_response_is_rejected_not_shipped():
@@ -171,11 +178,15 @@ async def test_auto_toggle_overrides_the_stored_target():
 
 
 async def test_auto_toggle_can_be_disabled(monkeypatch):
+    # 2026-09-20: Global=>MY is canonical. Even with AUTO_TOGGLE False the
+    # new pipeline still routes any non-Myanmar input to Myanmar (the
+    # disable path is kept for backward compat but the direction is now
+    # always Global=>MY). Provide a Myanmar answer so script_ok passes.
     monkeypatch.setattr(config, "AUTO_TOGGLE", False)
-    bot, router = FakeBot(), StubRouter(["Amount check here"])
+    bot, router = FakeBot(), StubRouter(["ပမာဏ စစ်ပေးပါ"])
     services = make_services(bot, router)
     await run(services, EN_TEXT, dst="en")
-    assert bot.edits[-1].text.startswith(header("EN", "EN"))
+    assert bot.edits[-1].text.startswith(header("EN", "MY"))
 
 
 # ---------------------------------------------------------------------------
@@ -235,10 +246,10 @@ async def test_success_is_cached_for_the_next_caller():
 # Gate 8 - rate limit
 # ---------------------------------------------------------------------------
 
-async def test_third_message_in_30s_gets_a_countdown(monkeypatch):
-    # Toggle off: this test is about the rate limiter, not the direction.
-    monkeypatch.setattr(config, "AUTO_TOGGLE", False)
-    bot, router = FakeBot(), StubRouter(["answer number one", "answer number two"])
+async def test_third_message_in_30s_gets_a_countdown():
+    # Rate limiter test - direction is now always Global=>MY, so provide
+    # Myanmar answers to pass script_ok.
+    bot, router = FakeBot(), StubRouter(["အဖြေ တစ်ခု", "အဖြေ နှစ်ခု"])
     services = make_services(bot, router)
     for text in ("first message here", "second message here",
                  "third message here"):

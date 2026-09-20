@@ -8,7 +8,14 @@ production should set REDIS_URL.
 Cache key (spec Gate 9): sha1(normalized_text + src + dst + policy_version)
 where normalization = casefold + collapse whitespace + fullwidth->halfwidth
 punctuation. TTL 7 days.
+
+Fail-soft (P1.4): every Redis-touching method degrades to the in-process
+store on Redis errors. The correctness trade is documented: in-memory
+idempotency/duplicate locks are per-process and best-effort when Redis is
+down. A P1 CACHE_UNREACHABLE is raised once on the first consecutive
+failure and resolved on the first successful Redis call.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -16,6 +23,10 @@ import logging
 import re
 import time
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .alerts import AlertManager
 
 log = logging.getLogger("opstranslate.cache")
 
@@ -84,21 +95,60 @@ class CacheEntry:
 
 
 class Cache:
-    def __init__(self, redis_url: str = ""):
+    def __init__(self, redis_url: str = "", alerts: "AlertManager | None" = None):
         self._redis = None
         if redis_url:
             import redis.asyncio as aioredis
 
             self._redis = aioredis.from_url(redis_url, decode_responses=True)
         self._mem = _MemoryStore()
+        self._alerts: "AlertManager | None" = alerts
+        self._fail_count: int = 0
+        self._alert_active: bool = False
+
+    def bind_alerts(self, alerts: "AlertManager | None") -> None:
+        """Attach an AlertManager after construction (used by build_services)."""
+        self._alerts = alerts
+
+    async def _on_redis_error(self, exc: Exception) -> None:
+        self._fail_count += 1
+        log.warning("cache_redis_error: %s (fail_count=%s)", exc, self._fail_count)
+        if self._alerts and not self._alert_active:
+            self._alert_active = True
+            try:
+                await self._alerts.send(
+                    "P1",
+                    "CACHE_UNREACHABLE",
+                    "redis",
+                    f"Redis unreachable ({type(exc).__name__}: {exc}); degraded to in-memory cache.",
+                    "Check Upstash/Redis status, REDIS_URL, and network; bot is serving best-effort from local memory.",
+                )
+            except Exception:  # noqa: BLE001
+                log.warning("cache_alert_send_failed", exc_info=True)
+
+    async def _on_redis_success(self) -> None:
+        if self._fail_count > 0:
+            self._fail_count = 0
+        if self._alert_active and self._alerts:
+            self._alert_active = False
+            try:
+                await self._alerts.resolve(
+                    "CACHE_UNREACHABLE",
+                    "redis",
+                    "Redis recovered; cache restored to Redis.",
+                )
+            except Exception:  # noqa: BLE001
+                log.warning("cache_alert_resolve_failed", exc_info=True)
 
     async def ping(self) -> bool:
         if self._redis is None:
             return True
         try:
             await self._redis.ping()
+            await self._on_redis_success()
             return True
-        except Exception:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001
+            await self._on_redis_error(exc)
             return False
 
     # -- idempotency (Gate 2): update_id not seen in the last 5 minutes ------
@@ -106,7 +156,12 @@ class Cache:
         """Return True if this update was already seen (caller should skip)."""
         key = f"idem:{update_id}"
         if self._redis is not None:
-            return not bool(await self._redis.set(key, "1", nx=True, ex=IDEMPOTENCY_TTL_S))
+            try:
+                result = not bool(await self._redis.set(key, "1", nx=True, ex=IDEMPOTENCY_TTL_S))
+                await self._on_redis_success()
+                return result
+            except Exception as exc:  # noqa: BLE001 - degrade to memory on Redis errors
+                await self._on_redis_error(exc)
         return not self._mem.setnx(key, "1", IDEMPOTENCY_TTL_S)
 
     # -- duplicate tracking (Gate 7) ------------------------------------------
@@ -114,7 +169,12 @@ class Cache:
         """Return False if the same request is already in flight."""
         key = dup_key + ":lock"
         if self._redis is not None:
-            return bool(await self._redis.set(key, "1", nx=True, ex=DUPLICATE_WINDOW_S))
+            try:
+                result = bool(await self._redis.set(key, "1", nx=True, ex=DUPLICATE_WINDOW_S))
+                await self._on_redis_success()
+                return result
+            except Exception as exc:  # noqa: BLE001
+                await self._on_redis_error(exc)
         return self._mem.setnx(key, "1", DUPLICATE_WINDOW_S)
 
     async def clear_inflight(self, dup_key: str) -> None:
@@ -122,22 +182,30 @@ class Cache:
         if self._redis is not None:
             try:
                 await self._redis.delete(key)
-            except Exception:  # noqa: BLE001
-                pass
-        else:
-            self._mem._data.pop(key, None)
+                await self._on_redis_success()
+            except Exception as exc:  # noqa: BLE001
+                await self._on_redis_error(exc)
+                # Still clear the local fallback so the in-memory lock does not leak.
+                self._mem._data.pop(key, None)
+                return
+        self._mem._data.pop(key, None)
 
     # -- translation cache (Gate 9) -------------------------------------------
     async def get(self, key: str) -> CacheEntry | None:
         if self._redis is not None:
-            raw = await self._redis.get(key)
-            if raw is None:
-                return None
-            text, _, ts = raw.partition("\x01")
             try:
-                return CacheEntry(text=text, stored_at=float(ts))
-            except ValueError:
-                return None
+                raw = await self._redis.get(key)
+                await self._on_redis_success()
+                if raw is None:
+                    return None
+                text, _, ts = raw.partition("\x01")
+                try:
+                    return CacheEntry(text=text, stored_at=float(ts))
+                except ValueError:
+                    return None
+            except Exception as exc:  # noqa: BLE001
+                await self._on_redis_error(exc)
+                # Fall through to memory fallback
         raw = self._mem.get(key)
         if raw is None:
             return None
@@ -150,16 +218,32 @@ class Cache:
     async def put(self, key: str, text: str) -> None:
         raw = f"{text}\x01{time.time()}"
         if self._redis is not None:
-            await self._redis.set(key, raw, ex=CACHE_TTL_S)
-        else:
-            self._mem.set(key, raw, ex=CACHE_TTL_S)
+            try:
+                await self._redis.set(key, raw, ex=CACHE_TTL_S)
+                await self._on_redis_success()
+                # Also mirror to _mem so a subsequent read after a Redis blip
+                # still finds the entry via fallback.
+                self._mem.set(key, raw, ex=CACHE_TTL_S)
+                return
+            except Exception as exc:  # noqa: BLE001
+                await self._on_redis_error(exc)
+        self._mem.set(key, raw, ex=CACHE_TTL_S)
 
     # -- generic string kv (group-membership cache, misc flags) ------------
     async def get_str(self, key: str) -> str | None:
         if self._redis is not None:
             try:
-                return await self._redis.get(key)
-            except Exception:  # noqa: BLE001 - degrade to miss on Redis errors
+                val = await self._redis.get(key)
+                await self._on_redis_success()
+                return val
+            except Exception as exc:  # noqa: BLE001 - degrade to miss on Redis errors
+                await self._on_redis_error(exc)
+                # Treat as miss but also check local memory (e.g. a prior
+                # degraded write). This keeps a kick/join invalidation from
+                # being invisible while Redis is down.
+                mem_val = self._mem.get(key)
+                if mem_val is not None:
+                    return mem_val
                 return None
         return self._mem.get(key)
 
@@ -167,26 +251,35 @@ class Cache:
         if self._redis is not None:
             try:
                 await self._redis.set(key, value, ex=ex)
+                await self._on_redis_success()
+                self._mem.set(key, value, ex=ex)
                 return
-            except Exception:  # noqa: BLE001 - degrade to memory on Redis errors
-                pass
+            except Exception as exc:  # noqa: BLE001 - degrade to memory on Redis errors
+                await self._on_redis_error(exc)
         self._mem.set(key, value, ex=ex)
 
     async def delete(self, key: str) -> None:
         if self._redis is not None:
             try:
                 await self._redis.delete(key)
-            except Exception:  # noqa: BLE001
-                pass
+                await self._on_redis_success()
+            except Exception as exc:  # noqa: BLE001
+                await self._on_redis_error(exc)
         self._mem._data.pop(key, None)
 
     # -- generic counters (spend cap, daily soft cap) --------------------------
     async def incr(self, key: str, ex: int) -> int:
         if self._redis is not None:
-            n = await self._redis.incr(key)
-            if n == 1:
-                await self._redis.expire(key, ex)
-            return n
+            try:
+                n = await self._redis.incr(key)
+                if n == 1:
+                    await self._redis.expire(key, ex)
+                await self._on_redis_success()
+                # Mirror to _mem for fallback reads
+                self._mem.set(key, str(n), ex=ex)
+                return n
+            except Exception as exc:  # noqa: BLE001
+                await self._on_redis_error(exc)
         raw = self._mem.get(key)
         n = (int(raw) + 1) if raw else 1
         self._mem.set(key, str(n), ex=ex)
@@ -194,19 +287,33 @@ class Cache:
 
     async def get_float(self, key: str) -> float:
         if self._redis is not None:
-            raw = await self._redis.get(key)
-            return float(raw) if raw else 0.0
+            try:
+                raw = await self._redis.get(key)
+                await self._on_redis_success()
+                return float(raw) if raw else 0.0
+            except Exception as exc:  # noqa: BLE001
+                await self._on_redis_error(exc)
+                mem_raw = self._mem.get(key)
+                return float(mem_raw) if mem_raw else 0.0
         raw = self._mem.get(key)
         return float(raw) if raw else 0.0
 
     async def incr_float(self, key: str, amount: float, ex: int) -> float:
         if self._redis is not None:
-            total = await self._redis.incrbyfloat(key, amount)
-            # Keep the TTL bounded: only set expiry on first write.
-            ttl = await self._redis.ttl(key)
-            if ttl == -1:
-                await self._redis.expire(key, ex)
-            return float(total)
+            try:
+                total = await self._redis.incrbyfloat(key, amount)
+                # Keep the TTL bounded: only set expiry on first write.
+                ttl = await self._redis.ttl(key)
+                if ttl == -1:
+                    await self._redis.expire(key, ex)
+                await self._on_redis_success()
+                self._mem.set(key, str(total), ex=ex)
+                return float(total)
+            except Exception as exc:  # noqa: BLE001
+                await self._on_redis_error(exc)
+                mem_total = (float(self._mem.get(key)) if self._mem.get(key) else 0.0) + amount
+                self._mem.set(key, str(mem_total), ex=ex)
+                return mem_total
         total = (await self.get_float(key)) + amount
         self._mem.set(key, str(total), ex=ex)
         return total
