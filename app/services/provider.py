@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 
 import httpx
 
+from .. import config
+
 log = logging.getLogger("opstranslate.provider")
 
 FAIL_THRESHOLD = 5
@@ -164,13 +166,22 @@ class ProviderRouter:
             ],
             "temperature": 0.1,
             "top_p": 0.9,
-            "max_tokens": 512,
+            "max_tokens": config.PROVIDER_MAX_OUTPUT_TOKENS,
         }
         headers = {"Authorization": f"Bearer {provider.api_key}"}
         resp = await client.post(url, json=payload, headers=headers, timeout=provider.timeout_s)
         resp.raise_for_status()
         data = resp.json()
         try:
-            return data["choices"][0]["message"]["content"].strip()
-        except (KeyError, IndexError, TypeError) as exc:
+            choice = data["choices"][0]
+            finish_reason = choice.get("finish_reason")
+            if finish_reason == "length":
+                raise ProviderError(
+                    "provider output reached max token limit "
+                    f"({config.PROVIDER_MAX_OUTPUT_TOKENS})"
+                )
+            return choice["message"]["content"].strip()
+        except ProviderError:
+            raise
+        except (KeyError, IndexError, TypeError, AttributeError) as exc:
             raise ProviderError(f"bad response shape: {exc}") from exc

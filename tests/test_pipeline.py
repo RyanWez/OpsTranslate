@@ -35,7 +35,7 @@ EN_TEXT = "check my game points"                # -> "ပမာဏ ..."     (src
 def _isolate(monkeypatch):
     """Fresh rate-limit state and known product rules for every test."""
     ratelimit.reset()
-    monkeypatch.setattr(config, "MAX_INPUT_CHARS", 250)
+    monkeypatch.setattr(config, "MAX_INPUT_CHARS", 500)
     monkeypatch.setattr(config, "AUTO_TOGGLE", True)
     monkeypatch.setattr(config, "DAILY_SPEND_CAP_USD", 5.0)
     monkeypatch.setattr(config, "PROVIDER_COST_PER_MSG_USD", 0.0004)
@@ -61,21 +61,21 @@ def header(src: str, dst: str) -> str:
 async def test_too_long_shows_the_count_and_spends_nothing():
     bot, router = FakeBot(), StubRouter()
     services = make_services(bot, router)
-    await run(services, "a" * 251)
+    await run(services, "a" * 501)
 
-    assert bot.sent[0].text == strings.TOO_LONG.format(n=251)
+    assert bot.sent[0].text == strings.TOO_LONG.format(n=501)
     assert bot.sent[0].reply_to == ANCHOR      # rejection is reply-anchored too
     assert router.calls == 0                   # never reached the paid gate
     assert ratelimit.check(USER) == 0          # no rate slot consumed
 
 
 async def test_exactly_at_the_cap_is_accepted(monkeypatch):
-    # Toggle off so the direction stays EN -> EN: a 250-char input needs a
+    # Toggle off so the direction stays EN -> EN: a 500-char input needs a
     # similarly long answer to pass the output/input sanity band.
     monkeypatch.setattr(config, "AUTO_TOGGLE", False)
-    bot, router = FakeBot(), StubRouter(["c" * 200])
+    bot, router = FakeBot(), StubRouter(["c" * 400])
     services = make_services(bot, router)
-    await run(services, "b" * 250, dst="en")
+    await run(services, "b" * 500, dst="en")
     assert router.calls == 1
     assert "too long" not in bot.last_text().lower()
 

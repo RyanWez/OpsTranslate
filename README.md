@@ -108,14 +108,16 @@ The schema logs **metadata only** (`usage_log` has no message-text column).
   (`[{"name":...,"base_url":...,"api_key":...,"model":...,"priority":2}]`);
   without it the single `PROVIDER_*` set is used as before.
 - `/healthz` grants a 10-minute startup grace before the working-hours
-  traffic check can fail; the spec's quiet-hours window is unchanged.
+  traffic check can fail; the spec's quiet-hours window (4h) is unchanged.
 - After a **second** policy deny hit the bot sends **nothing**: the
   "Translating…" placeholder is deleted, no fallback text is shown. The P2
   alert (concept/provider/version only, never message text) is the
   staff-visible signal.
-- After a **second** policy deny hit the bot sends **nothing** (no final
-  fallback message) - matches the spec's "send nothing, log, alert".
-- Backup providers are not yet config-driven (router supports them, wiring is
-  TODO).
-- `/healthz` has a 10-minute startup grace before the working-hours traffic
-  check can fail; the spec's 4h quiet-hours window is retained.
+- Input cap is `MAX_INPUT_CHARS` (default 500); UI strings, the Gate 5 check,
+  and the seeded `max_input_chars` setting all read the same value.
+- Provider output budget is `PROVIDER_MAX_OUTPUT_TOKENS` (default 1024). A
+  `finish_reason == "length"` response is treated as a provider failure
+  (failover, never a truncated answer).
+- Delivery is final-only: the validated translation replaces the
+  "Translating…" placeholder in one edit; no intermediate `…` partial frames
+  are sent.

@@ -2,7 +2,7 @@
 
 Creates tables (if missing) and seeds:
   - allowed_users from ALLOWED_USER_IDS (staff) and ADMIN_USER_IDS (admin)
-  - settings: max_input_chars = 250
+  - settings: max_input_chars = config.MAX_INPUT_CHARS
   - policy_versions v1 (published) with the section 4.2 mapping,
     per-language deny lists, and a starter regression set
   - providers: the primary provider from env
@@ -64,7 +64,7 @@ async def seed() -> None:
 
         # --- settings ------------------------------------------------------
         if await sess.get(Setting, "max_input_chars") is None:
-            sess.add(Setting(key="max_input_chars", value={"value": 250}))
+            sess.add(Setting(key="max_input_chars", value={"value": config.MAX_INPUT_CHARS}))
 
         # --- policy v1 -----------------------------------------------------
         version = config.POLICY_VERSION

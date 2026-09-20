@@ -266,23 +266,6 @@ async def animate_working(
         pass
 
 
-def reveal_frames(header: str, result: str) -> list[str]:
-    """Split the validated result into progressive typewriter frames.
-
-    Word-boundary chunks of ~12 words: a 250-char message yields 3-5 edits
-    over ~1.5s. Only ever called on fully validated text - a policy leak
-    must never be partially shown (withhold guarantee)."""
-    words = result.split()
-    if len(words) <= 4:
-        return [f"{header}\n{result}"]
-    step = max(4, (len(words) + 3) // 4)  # ~4 frames
-    frames = []
-    for end in range(step, len(words), step):
-        frames.append(f"{header}\n{' '.join(words[:end])} \u2026")
-    frames.append(f"{header}\n{result}")
-    return frames
-
-
 async def _edit_result(
     services: Services,
     chat_id: int,
@@ -290,23 +273,22 @@ async def _edit_result(
     src: str,
     dst: str,
     result: str,
-    animate: bool = True,
 ) -> None:
+    """Publish only the complete validated translation (final-only delivery).
+
+    Partial ``…`` frames are intentionally never sent: an interrupted edit
+    sequence used to look like a truncated answer, especially after the
+    input cap grew to 500 characters. The placeholder animation
+    (:func:`animate_working`) keeps the message alive while the provider
+    works; this function then replaces it with the final answer in one edit.
+    """
     header = strings.TRANSLATION_HEADER.format(SRC=src.upper(), DST=dst.upper())
-    if not animate:
-        # Cache-hit path: the answer was instant, reveal it at once.
-        await _edit_text(
-            services, chat_id, placeholder_id,
-            f"{header}\n{result}", reply_markup=copy_keyboard(result),
-        )
-        return
-    frames = reveal_frames(header, result)
-    for frame in frames[:-1]:
-        await _edit_text(services, chat_id, placeholder_id, frame)
-        await asyncio.sleep(0.35)
     await _edit_text(
-        services, chat_id, placeholder_id,
-        frames[-1], reply_markup=copy_keyboard(result),
+        services,
+        chat_id,
+        placeholder_id,
+        f"{header}\n{result}",
+        reply_markup=copy_keyboard(result),
     )
 
 
@@ -386,7 +368,7 @@ async def run_translation(
     if not (1 <= len(raw_text) <= config.MAX_INPUT_CHARS):
         await services.bot.send_message(
             chat_id,
-            strings.TOO_LONG.format(n=len(raw_text)),
+            strings.too_long_text(len(raw_text)),
             reply_parameters=ReplyParameters(
                 message_id=anchor_message_id, allow_sending_without_reply=True
             ),
@@ -430,8 +412,7 @@ async def run_translation(
         if cached is not None and (time.time() - cached.stored_at) < 30:
             # Already answered within 30s: resend, NO rate slot consumed.
             placeholder_id = await _send_placeholder(services, chat_id, anchor_message_id)
-            await _edit_result(services, chat_id, placeholder_id, src, dst, cached.text,
-                               animate=False)
+            await _edit_result(services, chat_id, placeholder_id, src, dst, cached.text)
             services.stats.record_ok(time.monotonic() - t0, cache_hit=True)
             return
 
@@ -467,8 +448,7 @@ async def run_translation(
         # -- Gate 9: cache ---------------------------------------------------
         if cached is not None:
             placeholder_id = await _send_placeholder(services, chat_id, anchor_message_id)
-            await _edit_result(services, chat_id, placeholder_id, src, dst, cached.text,
-                               animate=False)
+            await _edit_result(services, chat_id, placeholder_id, src, dst, cached.text)
             services.stats.record_ok(time.monotonic() - t0, cache_hit=True)
             await log_usage(
                 services, user_id=user_id, src_lang=src, dst_lang=dst,
@@ -494,7 +474,7 @@ async def run_translation(
 
         # Animated dots keep the placeholder alive while the provider
         # works (4-11s). Cancelled the moment translation finishes so the
-        # typewriter reveal starts on a clean handoff.
+        # final answer replaces it in one clean edit.
         anim_stop = asyncio.Event()
         anim_task = asyncio.create_task(
             animate_working(services, chat_id, placeholder_id, anim_stop)
