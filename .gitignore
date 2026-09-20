@@ -18,5 +18,15 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
+.zcode
+.antigravity
+.obsidian
+.cursor
+.claude
+.agent
+.gemini
+.opencode
+.agent
+
 # Local run artefacts
 *.log
