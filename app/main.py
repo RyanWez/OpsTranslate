@@ -120,7 +120,15 @@ async def lifespan(app: FastAPI):
 
         async def _poll():
             log.info("starting polling mode")
-            await dp.start_polling(bot, allowed_updates=ALLOWED_UPDATES)
+            try:
+                await dp.start_polling(
+                    bot,
+                    allowed_updates=ALLOWED_UPDATES,
+                    handle_signals=False,
+                    drop_pending_updates=True,
+                )
+            except Exception:
+                log.exception("Polling encountered an error and stopped")
 
         polling_task = asyncio.create_task(_poll())
     elif config.MODE == "webhook":
@@ -157,7 +165,17 @@ async def lifespan(app: FastAPI):
         except asyncio.CancelledError:
             pass
     if polling_task is not None:
+        try:
+            await dp.stop_polling()
+        except Exception:
+            pass
         polling_task.cancel()
+        try:
+            import asyncio
+
+            await polling_task
+        except asyncio.CancelledError:
+            pass
     await services.router.close()
     from .store import db as dbmod
 
