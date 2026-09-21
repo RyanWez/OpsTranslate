@@ -46,11 +46,13 @@ export const useProvidersStore = defineStore('providers', () => {
   }
 
   async function testProviderConnection(payload: {
+    id?: number | string
     base_url: string
-    api_key: string
+    api_key?: string
     model: string
     timeout_s?: number
   }): Promise<TestProviderResult> {
+
     testing.value = true
     testResult.value = null
     try {

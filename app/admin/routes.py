@@ -52,10 +52,12 @@ class ProviderPayload(BaseModel):
 
 
 class TestProviderRequest(BaseModel):
+    id: Optional[Any] = None
     base_url: str
-    api_key: str
+    api_key: Optional[str] = ""
     model: str
     timeout_s: float = 15.0
+
 
 
 class UserPayload(BaseModel):
@@ -391,12 +393,46 @@ async def test_provider(req: TestProviderRequest):
     """Test AI provider connection and return latency and completion sample."""
     t0 = time.monotonic()
     base = req.base_url.rstrip("/")
+    api_key = (req.api_key or "").strip()
+
+    # 1. If key is blank or contains masked bullet characters (•), retrieve real unmasked key
+    if not api_key or "•" in api_key:
+        stored = load_stored_providers()
+        for p in stored:
+            is_match = (
+                (req.id is not None and (str(p.get("id")) == str(req.id) or p.get("name") == str(req.id)))
+                or (p.get("base_url", "").rstrip("/") == base and p.get("model") == req.model)
+            )
+            if is_match and p.get("api_key"):
+                api_key = p["api_key"]
+                break
+
+    # 2. Check if key is available
+    if not api_key:
+        return {
+            "ok": False,
+            "status_code": 400,
+            "latency_ms": 0,
+            "error": "No API key configured for this provider. Please enter a valid API key.",
+        }
+
+    # 3. Validate header encoding safety
+    try:
+        api_key.encode("latin-1")
+    except UnicodeEncodeError:
+        return {
+            "ok": False,
+            "status_code": 400,
+            "latency_ms": 0,
+            "error": "API Key contains invalid non-ASCII characters (such as masked '•' dots). Please leave the field blank to use the stored unmasked key.",
+        }
+
     is_anthropic = "anthropic.com" in base or base.endswith("/messages")
 
     if is_anthropic:
         url = base if base.endswith("/messages") else f"{base}/messages"
         headers = {
-            "x-api-key": req.api_key,
+            "x-api-key": api_key,
             "anthropic-version": "2023-06-01",
             "content-type": "application/json",
         }
@@ -409,7 +445,7 @@ async def test_provider(req: TestProviderRequest):
         }
     else:
         url = base + "/chat/completions"
-        headers = {"Authorization": f"Bearer {req.api_key}", "Content-Type": "application/json"}
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
         payload = {
             "model": req.model,
             "messages": [
@@ -419,6 +455,7 @@ async def test_provider(req: TestProviderRequest):
             "max_tokens": 50,
             "temperature": 0.1,
         }
+
 
     async with httpx.AsyncClient() as client:
         try:

@@ -135,6 +135,7 @@ async function runPingTest() {
 
   try {
     const res = await providersStore.testProviderConnection({
+      id: testingTarget.value.id ?? testingTarget.value.name,
       base_url: testingTarget.value.base_url,
       api_key: customTestKey.value || '',
       model: testingTarget.value.model,
@@ -430,14 +431,21 @@ const columns = [
           </div>
 
           <div class="space-y-1.5">
-            <label class="text-xs text-gray-300">API Key (if testing new key or unpersisted)</label>
+            <div class="flex items-center justify-between">
+              <label class="text-xs text-gray-300 font-medium">API Key (Optional)</label>
+              <span class="text-[10px] text-emerald-400 font-mono">Auto: Uses stored key</span>
+            </div>
             <NInput
               v-model:value="customTestKey"
               type="password"
               show-password-on="click"
-              placeholder="Paste key to test, or leave blank to test DB key"
+              placeholder="Leave blank to test using the stored key automatically"
             />
+            <p class="text-[11px] text-gray-400 leading-relaxed">
+              ရှိပြီးသား Provider အတွက် API Key ပြန်ရိုက်ရန် မလိုပါ။ လွတ်ထားပါက စနစ်ထဲတွင် သိမ်းဆည်းထားသော မူလ Key ဖြင့် အလိုအလျောက် စမ်းသပ်ပေးပါမည်။
+            </p>
           </div>
+
 
           <NButton type="primary" block :loading="isTesting" @click="runPingTest">
             <template #icon>
