@@ -124,6 +124,8 @@ POLICY_VERSION = _get_int("POLICY_VERSION", 1)
 # --- Spending guard ---------------------------------------------------------
 DAILY_SPEND_CAP_USD = _get_float("DAILY_SPEND_CAP_USD", 5.0)
 PROVIDER_COST_PER_MSG_USD = _get_float("PROVIDER_COST_PER_MSG_USD", 0.0004)
+IGNORE_DAILY_CAPS = _get_bool("IGNORE_DAILY_CAPS", False)
+WITHHOLD_ON_LEAK = _get_bool("WITHHOLD_ON_LEAK", True)
 
 # --- Group gate (Phase 0: GP-member-only access) ---------------------------
 # Private DM requests are served ONLY to members of this group chat:

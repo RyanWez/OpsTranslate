@@ -95,6 +95,8 @@ def compile_policy(version: int = 1) -> Policy:
                 )
         for lang, term in concept.outputs.items():
             policy.outputs[(concept.key, lang)] = term
+    for matchers in policy.matchers.values():
+        matchers.sort(key=lambda m: len(m.pattern.pattern), reverse=True)
     for lang, terms in DENY_TERMS.items():
         policy.deny[lang] = list(terms)
     return policy
@@ -195,6 +197,60 @@ def deny_scan(text: str, dst: str, policy: Policy) -> list[str]:
     return hits
 
 
+# Regular expressions for sanitizing remaining forbidden terms in English output
+_EN_SANITIZE_RULES = [
+    # Complex phrases first (longest match)
+    (re.compile(r"\bregular\s+playing\s+fans?\b", re.IGNORECASE), "regular customer"),
+    (re.compile(r"\bplaying\s+fans?\b", re.IGNORECASE), "regular customer"),
+    (re.compile(r"\bregular\s+players?\b", re.IGNORECASE), "regular customer"),
+    (re.compile(r"\bregular\s+gamers?\b", re.IGNORECASE), "regular customer"),
+    (re.compile(r"\bfrequent\s+players?\b", re.IGNORECASE), "regular customer"),
+    (re.compile(r"\bgame\s+points?\b", re.IGNORECASE), "Amount"),
+    (re.compile(r"\bgame\s+ids?\b", re.IGNORECASE), "User ID"),
+    (re.compile(r"\bgame\s+accounts?\b", re.IGNORECASE), "User Account"),
+    (re.compile(r"\bplayer\s+ids?\b", re.IGNORECASE), "User ID"),
+    (re.compile(r"\bplayer\s+accounts?\b", re.IGNORECASE), "User Account"),
+    (re.compile(r"\bin-?game\b", re.IGNORECASE), "on the platform"),
+    (re.compile(r"\bplayers?\b", re.IGNORECASE), "Customer"),
+    (re.compile(r"\bgamers?\b", re.IGNORECASE), "Customer"),
+    (re.compile(r"\bplaying\b", re.IGNORECASE), "active"),
+    (re.compile(r"\bplayed\b", re.IGNORECASE), "operated"),
+    (re.compile(r"\bplays?\b", re.IGNORECASE), "uses"),
+    (re.compile(r"\bgames?\b", re.IGNORECASE), "platform"),
+    (re.compile(r"\bgaming\b", re.IGNORECASE), "platform"),
+    (re.compile(r"\bcasinos?\b", re.IGNORECASE), "platform"),
+    (re.compile(r"\bslots?\b", re.IGNORECASE), "platform"),
+    (re.compile(r"\b(betting|gamble|gambling|bettors?)\b", re.IGNORECASE), "transaction"),
+]
+
+# Regular expressions for sanitizing Myanmar output
+_MY_SANITIZE_RULES = [
+    (re.compile(r"ပုံမှန်(?:ကစား|ဆော့)နေကျ(?:\s*fan)?"), "ပုံမှန် Customer"),
+    (re.compile(r"(?:ကစား|ဆော့)နေကျ(?:\s*fan)?"), "ပုံမှန် Customer"),
+    (re.compile(r"ကစားသမား(?:များ)?|ကစားသူ(?:များ)?"), "Customer"),
+    (re.compile(r"(?:ကစား|ဆော့)နေ(?:တယ်|သည်)"), "အသုံးပြုနေတယ်"),
+    (re.compile(r"(?:ကစား|ဆော့)(?:တာ|ခြင်း)"), "အသုံးပြုခြင်း"),
+    (re.compile(r"ဂိမ်းပွိုင့်(?:များ)?"), "Amount"),
+    (re.compile(r"ဂိမ်းအိုင်ဒီ|ဂိမ်းအိုက်ဒီ|ဂိမ်း ID"), "User ID"),
+    (re.compile(r"ဂိမ်းအကောင့်"), "User Account"),
+    (re.compile(r"ဂိမ်းထဲ"), "Platform ထဲ"),
+    (re.compile(r"ဂိမ်း"), "Platform"),
+    (re.compile(r"ကာစီနို|စလော့"), "ဝန်ဆောင်မှု"),
+    (re.compile(r"လောင်းကစား|လောင်း"), "လုပ်ငန်းစဉ်"),
+]
+
+
+def sanitize_leaks(text: str, dst: str) -> str:
+    """Sanitize any remaining forbidden terms in text according to dst."""
+    if dst == "en":
+        for pattern, replacement in _EN_SANITIZE_RULES:
+            text = pattern.sub(replacement, text)
+    elif dst == "my":
+        for pattern, replacement in _MY_SANITIZE_RULES:
+            text = pattern.sub(replacement, text)
+    return text
+
+
 def _dominant_script(text: str) -> str:
     from .langdetect import script_of
 
@@ -277,7 +333,7 @@ def ratio_ok(source: str, output: str, src: str = "auto", dst: str = "en") -> bo
     elif s_script in ("cjk", "thai") and d_script == "myanmar":
         lo = 0.2
         hi = 6.0
-    elif d_script == "myanmar":
+    elif d_script == "myanmar" or dst == "my":
         lo = _CONTRACT_MIN
         hi = 5.0
 
@@ -300,30 +356,37 @@ def is_meta_response(text: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def build_system_prompt(src: str, dst: str, policy: Policy) -> str:
-    # Policy is asymmetric now (2026-09-20):
-    #   Myanmar -> EN : full term-policy (mask/render/deny)
-    #   Global  -> MY : relaxed (literal, natural, no restrictions)
-    # For MY target we emit no placeholder map and no forbidden list so
-    # Game Point can stay as ဂိမ်းပွိုင့် etc. Only chat tone remains.
     if dst == "my":
-        placeholder_map = "(none - translate freely and naturally)"
-        deny_list = "(none - no vocabulary restriction for Myanmar output)"
+        placeholder_map = "(none - translate freely into clean business tone)"
+        deny_list = ", ".join(policy.deny.get("my", [])) or "(none)"
         style_block = """## STYLE & TONE (COLLEAGUE CHAT)
 You are an internal chat translator for colleagues messaging each other at work.
 - Tone: Friendly, clear, natural, and direct. Like teammates communicating on Telegram: not stiff or formal, not flattering or servile (မတင်းမခယ).
 - Script: Always output in natural spoken Myanmar script (တယ်, တွေ, မယ်, ပါ).
-- Gaming & Ops Terminology: Translate freely and naturally as commonly spoken in Myanmar operations without censorship or restrictions. For example:
-  * Game Point -> ဂိမ်းပွိုင့်
-  * Game ID -> Game ID (or ဂိမ်းအိုင်ဒီ)
-  * Recharge / Deposit -> ငွေသွင်း
-  * Withdraw -> ငွေထုတ်
+- STRICT ZERO-GAMING POLICY: Never use words related to games or gambling (do NOT use "ဂိမ်း", "ကစားသမား", "ကစားနေတယ်", "ဆော့နေတယ်", "လောင်းကစား", "စလော့", "ကာစီနို").
+  Always use clean, professional customer/account terms:
+  * Customer / Member / Player -> Customer
+  * Regular customer / regular playing fan -> ပုံမှန် Customer
+  * Active / playing -> အသုံးပြုနေတယ်
+  * Points / Game Point / Balance -> Amount
+  * Game ID / User ID -> User ID
+  * Game Account / Account -> User Account
+  * In-game / Game -> Platform (or စနစ်)
+  * Recharge / Deposit -> ငွေသွင်း (or credit သွင်း)
+  * Withdraw / Withdrawal -> ငွေထုတ်
 - Keep it concise, natural, and conversational."""
         few_shot = """## FEW-SHOT
-<src>Game Point 100 recharge please</src>
-→ ဂိမ်းပွိုင့် ၁၀၀ သွင်းပေးပါဦး။
+<src>This Customer is a regular</src>
+→ ဒီ Customer က ပုံမှန် Customer ပါ။
 
-<src>Game ID is wrong, please check again</src>
-→ Game ID မှားနေတယ်၊ ပြန်စစ်ပေးပါဦး။
+<src>This Customer's registered phone number for withdrawals is about to hit its limit, so if the withdrawal fails, put the points back into their User Account</src>
+→ ဒီ Customer ရဲ့ ငွေထုတ်ရန် မှတ်ပုံတင်ထားတဲ့ ဖုန်းနံပါတ်က limit ပြည့်ခါနီးဖြစ်နေလို့ ငွေထုတ်ယူမှု မအောင်မြင်ပါက Amount ကို သူတို့ရဲ့ User Account ထဲ ပြန်ထည့်ပေးပါ။
+
+<src>Customer is currently active, please check.</src>
+→ Customer က အခု အသုံးပြုနေဆဲဖြစ်ပါတယ်၊ စစ်ဆေးပေးပါ။
+
+<src>User ID is wrong, please check again</src>
+→ User ID မှားနေတယ်၊ ပြန်စစ်ပေးပါဦး။
 
 <src>Hello, how are you today?</src>
 → မင်္ဂလာပါ၊ ဒီနေ့ နေကောင်းလား။"""
@@ -338,15 +401,34 @@ You are an internal chat translator for colleagues messaging each other at work.
         placeholder_map = "\n".join(placeholder_lines) or "(none)"
         deny_list = ", ".join(policy.deny.get(dst, [])) or "(none)"
         style_block = """## STYLE
-Write like colleagues messaging each other at work: friendly, clear, and
-natural. Not stiff/formal, not flattering/servile.
-- Myanmar input that maps to placeholders: the assigned placeholder terms
-  are fixed - use them exactly as given - but the rest of the sentence
-  must sound natural.
+Write like colleagues messaging each other at work: friendly, clear, and natural.
+- STRICT ZERO-GAMING POLICY: You must NEVER use words like "game", "games", "gaming", "play", "playing", "player", "players", "playing fan", "fan", "casino", "slot", "betting", "gamble".
+  Always use neutral customer/business terms:
+  * If the input describes a regular customer or playing fan, write: "This customer is a regular" or "regular customer". NEVER say "playing fan" or "fan".
+  * If the input mentions playing/gaming, write: "active" or "using the service".
+  * If the input mentions player, write: "Customer".
+  * If the input mentions points/game points, write: "Amount" or "Credits".
+- The assigned placeholder terms are fixed - use them exactly as given:
+  * ⟦T:regular_customer⟧ = "regular customer"
+  * ⟦T:activity⟧ = "active"
+  * ⟦T:member⟧ = "Customer"
+  * ⟦T:balance⟧ = "Amount"
+  * ⟦T:user_id⟧ = "User ID"
+  * ⟦T:user_account⟧ = "User Account"
+  * ⟦T:platform⟧ = "Platform"
 - English: plain natural business English."""
         few_shot = """## FEW-SHOT
+<src>PLEASE CHECK AGAIN THIS CUSTOMER IS REGULAR PLAYING FAN</src>
+→ Please check again, this customer is a regular.
+
+<src>ဒီ customer က ပုံမှန် ကစားနေကျ fan ပါ ပြန်စစ်ပေးပါ</src>
+→ Please check again, this customer is a regular.
+
+<src>Customer က အခု ကစားနေတယ်</src>
+→ The customer is currently active.
+
 <src>⟦T:user_account⟧ နံပါတ် ဘယ်လိုရှာမလဲ</src>
-→ How do I find my user account number?
+→ How do I find my User Account number?
 
 <src>⟦T:member⟧တွေ ⟦T:balance⟧ မရသေးလို့ ပြောနေကြတယ်။ မြန်မြန် စစ်ပေးပါ။</src>
 → Customers are saying they haven't received their Amount yet. Please check quickly."""

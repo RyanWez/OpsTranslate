@@ -164,3 +164,49 @@ def test_script_ok_tolerates_proper_nouns_and_placeholders():
     assert script_ok("⟦T:user_id⟧ ကို စစ်ပေးပါ", "my")
     assert script_ok("12 34", "my")                  # no letters to judge
     assert script_ok("anything at all", "auto")      # unknown target
+
+
+def test_regular_customer_and_activity_masked_and_rendered(policy):
+    # Tests zero-gaming compliance: regular playing fan -> regular customer, etc.
+    from app.policy.policy import sanitize_leaks
+
+    # English input
+    masked_en = mask("THIS CUSTOMER IS REGULAR PLAYING FAN", "en", policy)
+    assert "⟦T:regular_customer⟧" in masked_en
+    rendered_en = render(masked_en, "en", policy)
+    assert "regular customer" in rendered_en
+    assert "playing" not in rendered_en.lower()
+    assert "fan" not in rendered_en.lower()
+
+    # Myanmar input
+    masked_my = mask("ဒီ customer က ပုံမှန်ကစားနေကျ fan ပါ", "my", policy)
+    assert "⟦T:regular_customer⟧" in masked_my
+    rendered_my_to_en = render(masked_my, "en", policy)
+    assert "regular customer" in rendered_my_to_en
+
+    # Activity masking
+    masked_act = mask("customer ကစားနေတယ်", "my", policy)
+    assert "⟦T:activity⟧" in masked_act
+    rendered_act_to_en = render(masked_act, "en", policy)
+    assert "active" in rendered_act_to_en
+
+
+def test_sanitize_leaks():
+    from app.policy.policy import sanitize_leaks
+
+    # Residual leaks sanitized in English
+    raw_en = "This customer is regular playing fan and game points 100"
+    cleaned_en = sanitize_leaks(raw_en, "en")
+    assert "regular customer" in cleaned_en
+    assert "Amount" in cleaned_en
+    assert "playing" not in cleaned_en.lower()
+    assert "game" not in cleaned_en.lower()
+
+    # Residual leaks sanitized in Myanmar
+    raw_my = "ဒီ customer က ကစားသမား ဖြစ်ပြီး ဂိမ်းပွိုင့် ၁၀၀ ကစားနေတယ်"
+    cleaned_my = sanitize_leaks(raw_my, "my")
+    assert "Customer" in cleaned_my
+    assert "Amount" in cleaned_my
+    assert "အသုံးပြုနေတယ်" in cleaned_my
+    assert "ဂိမ်း" not in cleaned_my
+    assert "ကစားသမား" not in cleaned_my

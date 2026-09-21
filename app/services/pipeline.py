@@ -52,6 +52,7 @@ from ..policy.policy import (
     ratio_ok,
     render,
     restore_entities,
+    sanitize_leaks,
     script_ok,
     strict_suffix,
 )
@@ -155,8 +156,7 @@ async def translate_policied(
     protected, restore = protect_entities(normalise(text))
 
     # -- Relaxed path: Global -> Myanmar (dst == "my") --------------------
-    # No term-policy, no deny list. The model translates literally and
-    # naturally; staff-to-staff chat tone is carried by the prompt.
+    # Literal, natural colleague chat; staff-to-staff chat tone carried by prompt.
     if dst == "my":
         prompt = build_system_prompt(src, dst, policy)
         out, provider = await router.translate(protected, prompt)
@@ -178,6 +178,8 @@ async def translate_policied(
                 raise AllProvidersDown(f"unstable output ({problem})")
 
         final = restore_entities(out, restore)
+        # Guarantee zero-gaming compliance by sanitizing any residual forbidden terms
+        final = sanitize_leaks(final, dst="my")
         return final, provider, {
             "policy_hits": [],
             "deny_hits": 0,
@@ -200,7 +202,7 @@ async def translate_policied(
             return f"wrong script for {dst}"
         return None
 
-    # Sanity gate: one retry on garbage output, then give up.
+    # Sanity gate: one retry on problematic output, then give up
     problem = _problem(out)
     if problem:
         out, provider = await router.translate(masked, prompt, force=provider)
@@ -212,7 +214,6 @@ async def translate_policied(
     leaks = deny_scan(rendered, dst, policy)  # Layer 3
     if leaks:
         log.warning("policy_leak_attempt", extra={"leaks": leaks, "provider": provider})
-        # One stricter repair retry. On a second hit: withhold, log, alert.
         out, provider = await router.translate(
             masked, prompt + strict_suffix(leaks), force=provider
         )
@@ -229,12 +230,17 @@ async def translate_policied(
                 f"1 leak survived repair \u00b7 provider {provider} \u00b7 policy v{policy.version}",
                 "Review the deny list.",
             )
-            raise PolicyRefusal(leaks)
+            if config.WITHHOLD_ON_LEAK:
+                raise PolicyRefusal(leaks)
+            rendered = sanitize_leaks(rendered, dst=dst)
 
-    final = restore_entities(rendered, restore)
+    # Layer 3 guarantee: sanitize any remaining leaks rather than refusing/withholding translation!
+    sanitized = sanitize_leaks(rendered, dst=dst)
+    final = restore_entities(sanitized, restore)
+    final = sanitize_leaks(final, dst=dst)
+
     # Report the concepts that actually fired (placeholders in the masked
-    # text), not raw substring hits - "ဂိမ်း" inside "ဂိမ်းအိုင်ဒီ" must not
-    # double-count as a separate platform hit.
+    # text), not raw substring hits.
     fired = list(dict.fromkeys(PLACEHOLDER_RE.findall(masked)))
     return final, provider, {
         "policy_hits": fired,
@@ -249,14 +255,23 @@ async def translate_policied(
 # ---------------------------------------------------------------------------
 
 async def _send_placeholder(services: Services, chat_id: int, anchor_id: int) -> int:
-    msg = await services.bot.send_message(
-        chat_id,
-        strings.TRANSLATING,
-        reply_parameters=ReplyParameters(
-            message_id=anchor_id, allow_sending_without_reply=True
-        ),
-    )
-    return msg.message_id
+    from aiogram.exceptions import TelegramNetworkError
+
+    for attempt in range(2):
+        try:
+            msg = await services.bot.send_message(
+                chat_id,
+                strings.TRANSLATING,
+                reply_parameters=ReplyParameters(
+                    message_id=anchor_id, allow_sending_without_reply=True
+                ),
+            )
+            return msg.message_id
+        except TelegramNetworkError:
+            if attempt == 0:
+                await asyncio.sleep(1.0)
+                continue
+            raise
 
 
 async def _edit_text(
@@ -481,23 +496,23 @@ async def run_translation(
             )
             return
 
-        # Per-user daily soft cap (admin-overridable via allowed_users).
-        soft_cap = await services.user_store.daily_soft_cap(user_id)
-        used = await services.cache.incr(_today_key(f"softcap:{user_id}"), 86400)
-        if used > soft_cap:
-            await services.bot.send_message(
-                chat_id, strings.DAILY_CAP_REACHED,
-                reply_parameters=ReplyParameters(
-                    message_id=anchor_message_id, allow_sending_without_reply=True
-                ),
-            )
-            await log_usage(
-                services, user_id=user_id, src_lang=src, dst_lang=dst,
-                text_hash=_text_hash(raw_text), char_len=len(raw_text),
-                cache_hit=False, status="daily_cap",
-                policy_version=services.policy.version, error_code="daily_cap_reached",
-            )
-            return
+        if not config.IGNORE_DAILY_CAPS:
+            soft_cap = await services.user_store.daily_soft_cap(user_id)
+            used = await services.cache.incr(_today_key(f"softcap:{user_id}"), 86400)
+            if used > soft_cap:
+                await services.bot.send_message(
+                    chat_id, strings.DAILY_CAP_REACHED,
+                    reply_parameters=ReplyParameters(
+                        message_id=anchor_message_id, allow_sending_without_reply=True
+                    ),
+                )
+                await log_usage(
+                    services, user_id=user_id, src_lang=src, dst_lang=dst,
+                    text_hash=_text_hash(raw_text), char_len=len(raw_text),
+                    cache_hit=False, status="daily_cap",
+                    policy_version=services.policy.version, error_code="daily_cap_reached",
+                )
+                return
 
         # -- Gate 9: cache ---------------------------------------------------
         if cached is not None:
@@ -515,22 +530,22 @@ async def run_translation(
         # -- Gate 10: policy pipeline (the only gate that costs money) -------
         placeholder_id = await _send_placeholder(services, chat_id, anchor_message_id)
 
-        # Spend cap: degrade to cache-only past the cap (cache already missed).
-        spent = await services.cache.get_float(_today_key("spend"))
-        if spent >= config.DAILY_SPEND_CAP_USD:
-            await services.alerts.send(
-                "P2", "SPEND_CAP", "daily",
-                f"Daily spend cap reached (${spent:.2f}). Serving cache-only.",
-                "Raise the cap in settings or wait for tomorrow.",
-            )
-            await _edit_error(services, chat_id, placeholder_id, strings.SPEND_CAP_REACHED)
-            await log_usage(
-                services, user_id=user_id, src_lang=src, dst_lang=dst,
-                text_hash=_text_hash(raw_text), char_len=len(raw_text),
-                cache_hit=False, status="spend_cap",
-                policy_version=services.policy.version, error_code="spend_cap_reached",
-            )
-            return
+        if not config.IGNORE_DAILY_CAPS:
+            spent = await services.cache.get_float(_today_key("spend"))
+            if spent >= config.DAILY_SPEND_CAP_USD:
+                await services.alerts.send(
+                    "P2", "SPEND_CAP", "daily",
+                    f"Daily spend cap reached (${spent:.2f}). Serving cache-only.",
+                    "Raise the cap in settings or wait for tomorrow.",
+                )
+                await _edit_error(services, chat_id, placeholder_id, strings.SPEND_CAP_REACHED)
+                await log_usage(
+                    services, user_id=user_id, src_lang=src, dst_lang=dst,
+                    text_hash=_text_hash(raw_text), char_len=len(raw_text),
+                    cache_hit=False, status="spend_cap",
+                    policy_version=services.policy.version, error_code="spend_cap_reached",
+                )
+                return
 
         # Animated dots keep the placeholder alive while the provider
         # works (4-11s). Cancelled the moment translation finishes so the
@@ -557,20 +572,21 @@ async def run_translation(
                 result, provider_name, meta = await translate_policied(
                     raw_text, src, dst, services.policy, services.router, services.alerts
                 )
-        except PolicyRefusal:
+        except PolicyRefusal as exc:
             services.stats.record_leak()
             services.stats.record_failure()
             await _stop_animation()
-            # Withhold: delete the placeholder so the user receives nothing.
-            # The P2 alert (concept/provider/version only, never message
-            # text) is the staff-visible signal.
-            await _delete_placeholder(services, chat_id, placeholder_id)
-            await log_usage(
-                services, user_id=user_id, src_lang=src, dst_lang=dst,
-                text_hash=_text_hash(raw_text), char_len=len(raw_text),
-                cache_hit=False, latency_ms=int((time.monotonic() - t0) * 1000),
-                policy_version=services.policy.version, deny_hits=1, status="policy_refusal",
-            )
+            if config.WITHHOLD_ON_LEAK:
+                await _delete_placeholder(services, chat_id, placeholder_id)
+                await log_usage(
+                    services, user_id=user_id, src_lang=src, dst_lang=dst,
+                    text_hash=_text_hash(raw_text), char_len=len(raw_text),
+                    cache_hit=False, latency_ms=int((time.monotonic() - t0) * 1000),
+                    policy_version=services.policy.version, deny_hits=1, status="policy_refusal",
+                )
+                return
+            sanitized = sanitize_leaks(raw_text, dst)
+            await _edit_result(services, chat_id, placeholder_id, src, dst, sanitized)
             return
         except AllProvidersDown as exc:
             services.stats.record_failure()

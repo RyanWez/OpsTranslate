@@ -204,7 +204,21 @@ class ProviderRouter:
         }
         headers = {"Authorization": f"Bearer {provider.api_key}"}
         resp = await client.post(url, json=payload, headers=headers, timeout=provider.timeout_s)
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            err_msg = ""
+            try:
+                err_body = resp.json()
+                if isinstance(err_body, dict):
+                    err_inner = err_body.get("error")
+                    if isinstance(err_inner, dict) and "message" in err_inner:
+                        err_msg = f": {err_inner['message']}"
+                    elif isinstance(err_inner, str):
+                        err_msg = f": {err_inner}"
+            except Exception:
+                err_msg = f": {resp.text[:120]}"
+            raise ProviderError(f"HTTP {resp.status_code}{err_msg}") from exc
         data = resp.json()
         try:
             choice = data["choices"][0]

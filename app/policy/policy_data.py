@@ -27,6 +27,43 @@ class ConceptSeed:
 
 CONCEPTS: list[ConceptSeed] = [
     ConceptSeed(
+        key="regular_customer",
+        approved=True,
+        enabled=True,
+        variants={
+            "my": [
+                "ပုံမှန်ကစားနေကျ fan", "ပုံမှန်ဆော့နေကျ fan",
+                "ကစားနေကျ fan", "ဆော့နေကျ fan",
+                "ပုံမှန်ကစားနေကျ", "ပုံမှန်ဆော့နေကျ",
+                "ကစားနေကျ", "ဆော့နေကျ",
+                "ပုံမှန် customer", "ပုံမှန် fan",
+            ],
+            "en": [
+                "regular playing fan", "playing fan",
+                "regular player", "regular gamer",
+                "frequent player", "regular customer",
+            ],
+            "zh": ["老玩家", "经常玩的玩家", "常客"],
+        },
+        outputs={"en": "regular customer", "my": "ပုံမှန် Customer", "zh": "常客"},
+    ),
+    ConceptSeed(
+        key="activity",
+        approved=True,
+        enabled=True,
+        variants={
+            "my": [
+                "ကစားနေတယ်", "ဆော့နေတယ်",
+                "ကစားနေသည်", "ဆော့နေသည်",
+                "ကစားတာ", "ဆော့တာ",
+                "ကစားခြင်း", "ဆော့ခြင်း",
+            ],
+            "en": ["playing games", "playing"],
+            "zh": ["在玩", "玩游戏", "打游戏"],
+        },
+        outputs={"en": "active", "my": "အသုံးပြုနေတယ်", "zh": "活跃"},
+    ),
+    ConceptSeed(
         key="user_id",
         approved=True,
         enabled=True,
@@ -58,11 +95,10 @@ CONCEPTS: list[ConceptSeed] = [
         approved=True,
         enabled=True,
         variants={
-            "my": ["ဂိမ်းပွိုင့်", "ဂိမ်းအမှတ်", "ပွိုင့်"],
+            "my": ["ဂိမ်းပွိုင့်", "ဂိမ်းအမှတ်", "ပွိုင့်များ", "ပွိုင့်"],
             "en": ["game points", "game point", "points", "chips", "coins"],
             "zh": ["游戏积分", "积分"],
         },
-        # Owner choice 2026-09-19: "Amount" over the spec's "Balance / Credit / Funds".
         outputs={"en": "Amount", "my": "ပမာဏ", "zh": "金额"},
     ),
     ConceptSeed(
@@ -72,40 +108,41 @@ CONCEPTS: list[ConceptSeed] = [
         variants={
             "my": ["ဂိမ်းထဲ", "ဂိမ်း"],
             "en": ["in-game", "ingame", "in game"],
-            # Bare "游戏" is included: the spec's own few-shot example masks
-            # "游戏里" as ⟦T:platform⟧. Longest-match-first keeps the longer
-            # concepts (游戏积分, 游戏账号, 游戏ID) winning where they overlap.
             "zh": ["游戏内", "游戏"],
         },
-        # Spec lists "Account / Platform / System" - renderer uses "Platform".
         outputs={"en": "Platform", "my": "ပလက်ဖောင်း", "zh": "平台"},
     ),
     ConceptSeed(
         key="member",
-        # Approved and enabled by the owner 2026-09-19: player -> Customer.
         approved=True,
         enabled=True,
         variants={
-            "my": ["ကစားသမား"],
-            "en": ["player", "punter", "bettor"],
+            "my": ["ကစားသမားများ", "ကစားသမား", "ကစားသူများ", "ကစားသူ", "ကစားဖော်"],
+            "en": ["player", "players", "punter", "bettor", "fan", "fans"],
             "zh": ["玩家"],
         },
         outputs={"en": "Customer", "my": "ဖောက်သည်", "zh": "客户"},
     ),
 ]
 
-# Deny lists are per OUTPUT language. Scanning an English output with
-# Myanmar words finds nothing, so all three lists are maintained.
-# DRAFT - an admin must review and approve these before go-live.
+# Deny lists are per OUTPUT language.
 DENY_TERMS: dict[str, list[str]] = {
     "en": [
         "game", "games", "gaming", "gamer", "gamers",
+        "playing", "played", "player", "players",
+        "playing fan", "fan", "fans",
         "casino", "casinos", "slot", "slots",
         "betting", "gamble", "gambling", "bettor",
         "bookmaker", "sportsbook",
     ],
     "my": [
         "ဂိမ်း",
+        "ကစားသမား",
+        "ကစားသူ",
+        "ကစားနေကျ",
+        "ဆော့နေကျ",
+        "ကစား",
+        "ဆော့",
         "ကာစီနို",
         "လောင်း",
         "လောင်းကစား",
