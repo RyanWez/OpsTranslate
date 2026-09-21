@@ -654,15 +654,33 @@ async def test_playground(req: PlaygroundRequest, request: Request):
 @router.get("/logs", dependencies=[Depends(require_admin)])
 async def get_logs(request: Request, limit: int = 50):
     services: Services = request.app.state.services
+
+    def _format_log(raw: dict) -> dict:
+        st = raw.get("status", 200)
+        norm_status = 200 if st == "ok" else st
+        prov = raw.get("provider")
+        if not prov or prov == "unknown":
+            prov = "Gemini"
+        return {
+            "id": raw.get("id"),
+            "user_id": raw.get("user_id", 0),
+            "char_len": raw.get("char_len", 0),
+            "provider": prov,
+            "latency_ms": raw.get("latency_ms", 0),
+            "status": norm_status,
+            "policy_hits": raw.get("policy_hits") or [],
+            "created_at": raw.get("created_at"),
+        }
+
     if not dbmod.is_configured():
-        return {"logs": list(services.stats.recent_logs)[:limit]}
+        return {"logs": [_format_log(l) for l in list(services.stats.recent_logs)[:limit]]}
     
     try:
         from sqlalchemy import select
 
         async with dbmod.session() as sess:
             result = await sess.execute(
-                select(UsageLog).order_by(UsageLog.created_at.desc()).limit(limit)
+                select(UsageLog).order_by(UsageLog.ts.desc()).limit(limit)
             )
             rows = result.scalars().all()
             logs = []
@@ -671,15 +689,16 @@ async def get_logs(request: Request, limit: int = 50):
                     "id": r.id,
                     "user_id": r.user_id,
                     "char_len": r.char_len,
-                    "provider": r.provider,
+                    "provider": getattr(r, "provider", None) or "Gemini",
                     "latency_ms": r.latency_ms,
-                    "status": r.status,
-                    "policy_hits": r.policy_hits,
-                    "created_at": r.created_at.strftime("%Y-%m-%d %H:%M:%S") if r.created_at else None,
+                    "status": 200 if r.status == "ok" else r.status,
+                    "policy_hits": r.policy_hits or [],
+                    "created_at": r.ts.strftime("%Y-%m-%d %H:%M:%S") if r.ts else None,
                 })
             if logs:
                 return {"logs": logs}
-            return {"logs": list(services.stats.recent_logs)[:limit]}
+            return {"logs": [_format_log(l) for l in list(services.stats.recent_logs)[:limit]]}
     except Exception:
-        return {"logs": list(services.stats.recent_logs)[:limit]}
+        return {"logs": [_format_log(l) for l in list(services.stats.recent_logs)[:limit]]}
+
 

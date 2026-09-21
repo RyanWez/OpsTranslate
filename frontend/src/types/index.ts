@@ -89,8 +89,9 @@ export interface UsageLogItem {
   char_len: number
   provider: string
   latency_ms: number
-  status: number
+  status: number | string
   policy_hits: string[]
+
   created_at: string | null
 }
 

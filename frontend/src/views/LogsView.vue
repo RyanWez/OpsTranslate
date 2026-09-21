@@ -130,10 +130,17 @@ const columns = [
     title: 'Provider',
     key: 'provider',
     render(row: UsageLogItem) {
+      const p = row.provider || 'Gemini'
+      const isCache = p.toLowerCase() === 'cache'
       return h(
         NTag,
-        { size: 'small', bordered: false, class: 'font-mono text-xs text-cyan-300' },
-        { default: () => row.provider }
+        {
+          size: 'small',
+          bordered: false,
+          type: isCache ? 'warning' : 'info',
+          class: 'font-mono text-xs font-semibold',
+        },
+        { default: () => p }
       )
     },
   },
@@ -151,7 +158,7 @@ const columns = [
     width: 120,
     render(row: UsageLogItem) {
       const ms = row.latency_ms
-      const type = ms < 800 ? 'success' : ms < 2500 ? 'warning' : 'error'
+      const type = ms < 2000 ? 'success' : ms < 10000 ? 'info' : ms < 20000 ? 'warning' : 'error'
       return h(
         NTag,
         { size: 'small', type, class: 'font-mono text-xs' },
@@ -162,16 +169,17 @@ const columns = [
   {
     title: 'Status',
     key: 'status',
-    width: 100,
+    width: 110,
     render(row: UsageLogItem) {
+      const isOk = row.status === 200 || row.status === 'ok' || String(row.status) === '200'
       return h(
         NTag,
         {
           size: 'small',
-          type: row.status === 200 ? 'success' : 'error',
-          class: 'font-mono text-[11px]',
+          type: isOk ? 'success' : 'error',
+          class: 'font-mono text-[11px] font-semibold',
         },
-        { default: () => row.status }
+        { default: () => (isOk ? '200 OK' : String(row.status)) }
       )
     },
   },
@@ -180,7 +188,7 @@ const columns = [
     key: 'policy_hits',
     render(row: UsageLogItem) {
       if (!row.policy_hits || row.policy_hits.length === 0) {
-        return h('span', { class: 'text-xs text-gray-600' }, 'None')
+        return h('span', { class: 'text-xs text-gray-500 font-mono' }, '—')
       }
       return h(
         'div',

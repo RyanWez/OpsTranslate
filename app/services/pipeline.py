@@ -528,8 +528,8 @@ async def run_translation(
             await log_usage(
                 services, user_id=user_id, src_lang=src, dst_lang=dst,
                 text_hash=_text_hash(raw_text), char_len=len(raw_text),
-                cache_hit=True, latency_ms=int((time.monotonic() - t0) * 1000),
-                policy_version=services.policy.version, status="ok",
+                provider="cache", cache_hit=True, latency_ms=int((time.monotonic() - t0) * 1000),
+                policy_version=services.policy.version, status=200,
             )
             return
 
@@ -650,11 +650,11 @@ async def run_translation(
         await log_usage(
             services, user_id=user_id, src_lang=src, dst_lang=dst,
             text_hash=_text_hash(raw_text), char_len=len(raw_text),
-            provider_id=None, cache_hit=False,
+            provider=provider_name, provider_id=None, cache_hit=False,
             latency_ms=int((time.monotonic() - t0) * 1000),
             policy_version=services.policy.version,
-            policy_hits=meta.get("policy_hits"), deny_hits=meta.get("deny_hits"),
-            ratio=meta.get("ratio"), status="ok",
+            policy_hits=meta.get("policy_hits") or [], deny_hits=meta.get("deny_hits"),
+            ratio=meta.get("ratio"), status=200,
         )
     finally:
         await services.cache.clear_inflight(dup)

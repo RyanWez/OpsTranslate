@@ -57,14 +57,20 @@ class Stats:
 
     def record_usage_log(self, fields: dict) -> None:
         self._log_counter += 1
+        raw_status = fields.get("status", 200)
+        norm_status = 200 if raw_status == "ok" else raw_status
+        prov = fields.get("provider") or fields.get("provider_name")
+        if not prov or prov == "unknown":
+            prov = "cache" if fields.get("cache_hit") else "Gemini"
+
         log_entry = {
             "id": fields.get("id") or self._log_counter,
             "user_id": fields.get("user_id", 0),
             "char_len": fields.get("char_len", 0),
-            "provider": fields.get("provider", "unknown"),
+            "provider": prov,
             "latency_ms": fields.get("latency_ms", 0),
-            "status": fields.get("status", 200),
-            "policy_hits": fields.get("policy_hits", []),
+            "status": norm_status,
+            "policy_hits": fields.get("policy_hits") or [],
             "created_at": fields.get("created_at") or time.strftime("%Y-%m-%d %H:%M:%S"),
         }
         self.recent_logs.appendleft(log_entry)
