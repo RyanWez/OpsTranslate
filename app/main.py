@@ -200,14 +200,23 @@ app = FastAPI(title="OpsTranslate Bot", lifespan=lifespan)
 # Mount Admin API
 app.include_router(admin_router)
 
-# Mount Admin Static UI
+# Mount Admin Static UI & SPA Assets
 _static_dir = Path(__file__).parent / "static" / "admin"
-app.mount("/admin-static", StaticFiles(directory=_static_dir), name="admin-static")
+_assets_dir = _static_dir / "assets"
+_assets_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/admin/assets", StaticFiles(directory=_assets_dir), name="admin-assets")
 
 
 @app.get("/admin", response_class=FileResponse)
-async def admin_page():
-    return FileResponse(_static_dir / "index.html")
+@app.get("/admin/{full_path:path}", response_class=FileResponse)
+async def admin_spa(full_path: str = ""):
+    target = _static_dir / full_path
+    if full_path and target.is_file():
+        return FileResponse(target)
+    index_file = _static_dir / "index.html"
+    if index_file.is_file():
+        return FileResponse(index_file)
+    raise HTTPException(status_code=404, detail="Admin UI not built.")
 
 
 @app.get("/")

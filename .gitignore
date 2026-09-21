@@ -30,3 +30,14 @@ Thumbs.db
 
 # Local run artefacts
 *.log
+
+# Node & Frontend
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+*.tsbuildinfo
+.npm
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

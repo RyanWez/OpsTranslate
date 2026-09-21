@@ -1,0 +1,84 @@
+import { defineStore } from 'pinia'
+import { ref } from 'vue'
+import { api } from '../api'
+import type { ProviderItem, ProviderPayload, TestProviderResult } from '../types'
+
+export const useProvidersStore = defineStore('providers', () => {
+  const providers = ref<ProviderItem[]>([])
+  const loading = ref<boolean>(false)
+  const testing = ref<boolean>(false)
+  const testResult = ref<TestProviderResult | null>(null)
+
+  async function fetchProviders(): Promise<void> {
+    loading.value = true
+    try {
+      const res = await api.getProviders()
+      providers.value = res.data.providers || []
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function saveProvider(id: number | null, payload: ProviderPayload): Promise<boolean> {
+    loading.value = true
+    try {
+      if (id !== null) {
+        await api.updateProvider(id, payload)
+      } else {
+        await api.createProvider(payload)
+      }
+      await fetchProviders()
+      return true
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function deleteProvider(id: number): Promise<boolean> {
+    loading.value = true
+    try {
+      await api.deleteProvider(id)
+      await fetchProviders()
+      return true
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function testProviderConnection(payload: {
+    base_url: string
+    api_key: string
+    model: string
+    timeout_s?: number
+  }): Promise<TestProviderResult> {
+    testing.value = true
+    testResult.value = null
+    try {
+      const res = await api.testProvider(payload)
+      testResult.value = res.data
+      return res.data
+    } catch (err: any) {
+      const fallback = {
+        ok: false,
+        status_code: 0,
+        latency_ms: 0,
+        error: err.response?.data?.detail || err.message,
+      }
+      testResult.value = fallback
+      return fallback
+    } finally {
+      testing.value = false
+    }
+  }
+
+  return {
+    providers,
+    loading,
+    testing,
+    testResult,
+    fetchProviders,
+    saveProvider,
+    deleteProvider,
+    testProviderConnection,
+  }
+})

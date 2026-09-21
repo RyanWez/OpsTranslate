@@ -24,18 +24,19 @@ def test_admin_page_serves_html(client):
     res = client.get("/admin")
     assert res.status_code == 200
     assert "OpsTranslate Control Center" in res.text
-    assert "admin.css" in res.text
-    assert "admin.js" in res.text
+    assert '<div id="app"></div>' in res.text
 
 
 def test_admin_static_assets_serve(client):
-    res_css = client.get("/admin-static/admin.css")
-    assert res_css.status_code == 200
-    assert "--bg-canvas" in res_css.text
-
-    res_js = client.get("/admin-static/admin.js")
+    import re
+    res = client.get("/admin")
+    assert res.status_code == 200
+    match = re.search(r'src="(/admin/assets/[^"]+\.js)"', res.text)
+    assert match is not None, "JS asset script tag not found in /admin HTML"
+    js_url = match.group(1)
+    res_js = client.get(js_url)
     assert res_js.status_code == 200
-    assert "OpsTranslate Control Center" in res_js.text
+    assert len(res_js.content) > 1000
 
 
 def test_admin_auth_flow(client, monkeypatch):

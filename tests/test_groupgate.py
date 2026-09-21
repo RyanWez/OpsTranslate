@@ -219,7 +219,7 @@ def _real_member(status: str, is_member: bool | None = None):
     if status == "member":
         return ChatMemberMember(chat_type="supergroup", user=_SUBJECT)
     if status == "administrator":
-        return ChatMemberAdministrator(
+        return ChatMemberAdministrator.model_construct(
             chat_type="supergroup", user=_SUBJECT, can_be_edited=True,
             is_anonymous=False, can_manage_chat=True, can_delete_messages=True,
             can_manage_video_chats=True, can_restrict_members=True,
@@ -237,7 +237,7 @@ def _real_member(status: str, is_member: bool | None = None):
                                 until_date=datetime(2030, 1, 1,
                                                     tzinfo=timezone.utc))
     if status == "restricted":
-        return ChatMemberRestricted(
+        return ChatMemberRestricted.model_construct(
             chat_type="supergroup", user=_SUBJECT, is_member=bool(is_member),
             can_send_messages=True, can_send_audios=True,
             can_send_documents=True, can_send_photos=True,
@@ -437,7 +437,7 @@ async def test_bot_removed_from_group_alerts_and_returns_resolve():
         from_user=User(id=999, is_bot=False, first_name="Admin"),
         date=datetime.now(timezone.utc),
         old_chat_member=ChatMemberLeft(chat_type="supergroup", user=bot_user),
-        new_chat_member=ChatMemberAdministrator(
+        new_chat_member=ChatMemberAdministrator.model_construct(
             chat_type="supergroup", user=bot_user, can_be_edited=True,
             is_anonymous=False, can_manage_chat=True, can_delete_messages=True,
             can_manage_video_chats=True, can_restrict_members=True,

@@ -1,3 +1,12 @@
+# Stage 1: Build Vue 3 Admin Frontend
+FROM node:22-alpine AS frontend-builder
+WORKDIR /build/frontend
+COPY frontend/package*.json ./
+RUN npm install
+COPY frontend/ ./
+RUN npm run build
+
+# Stage 2: Python Backend & Final Container
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -14,6 +23,8 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt
 
 COPY app/ ./app/
+# Copy fresh compiled frontend assets into app/static/admin
+COPY --from=frontend-builder /build/app/static/admin ./app/static/admin
 COPY alembic/ ./alembic/
 COPY alembic.ini .
 
