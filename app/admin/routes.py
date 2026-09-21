@@ -24,7 +24,12 @@ from ..services.pipeline import Services, resolve_toggle_dst
 from ..services.provider import Provider as ServiceProvider
 from ..store import db as dbmod
 from ..store.models import AllowedUser, Provider as DBProvider, UsageLog
-from ..store.providers import get_active_service_providers, sync_router_providers
+from ..store.providers import (
+    get_active_service_providers,
+    load_stored_providers,
+    save_stored_providers,
+    sync_router_providers,
+)
 from .auth import get_expected_token, is_authenticated, require_admin, verify_password
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -200,22 +205,24 @@ async def list_providers(request: Request):
                     })
                 if out:
                     return {"providers": out}
-        except Exception as exc:
+        except Exception:
             pass
 
-    # Fallback to in-memory router providers
-    for idx, p in enumerate(services.router.providers):
+    # Persistent local storage (data/providers.json)
+    stored = load_stored_providers()
+    for d in stored:
+        b_state = breaker_states.get(d["name"], "closed" if d.get("enabled", True) else "paused")
         out.append({
-            "id": idx + 1,
-            "name": p.name,
-            "base_url": p.base_url,
-            "api_key_masked": _mask_key(p.api_key),
-            "model": p.model,
-            "priority": p.priority,
-            "enabled": p.enabled,
-            "timeout_s": p.timeout_s,
-            "breaker_state": breaker_states.get(p.name, "closed"),
-            "source": "memory/env",
+            "id": d["id"],
+            "name": d["name"],
+            "base_url": d["base_url"],
+            "api_key_masked": _mask_key(d.get("api_key", "")),
+            "model": d["model"],
+            "priority": d.get("priority", 1),
+            "enabled": d.get("enabled", True),
+            "timeout_s": d.get("timeout_s", 15.0),
+            "breaker_state": b_state,
+            "source": "persisted",
         })
     return {"providers": out}
 
@@ -256,21 +263,27 @@ async def create_provider(payload: ProviderPayload, request: Request):
         except Exception:
             pass
 
-    # In-memory mode (tests or DB-less deployment)
-    if any(p.name == payload.name for p in services.router.providers):
+    # File-backed persistence (data/providers.json)
+    stored = load_stored_providers()
+    if any(p["name"].lower() == payload.name.lower() for p in stored):
         raise HTTPException(status_code=400, detail=f"Provider with name '{payload.name}' already exists.")
-    new_sp = ServiceProvider(
-        name=payload.name,
-        base_url=payload.base_url.rstrip("/"),
-        api_key=payload.api_key or "",
-        model=payload.model,
-        priority=payload.priority,
-        enabled=payload.enabled,
-        timeout_s=payload.timeout_s,
-    )
-    services.router.reload_providers(services.router.providers + [new_sp])
 
-    return {"ok": True, "id": new_provider_id, "message": "Provider created and router reloaded."}
+    next_id = max([p.get("id", 0) for p in stored], default=0) + 1
+    new_entry = {
+        "id": next_id,
+        "name": payload.name,
+        "base_url": payload.base_url.rstrip("/"),
+        "api_key": payload.api_key or "",
+        "model": payload.model,
+        "priority": payload.priority,
+        "enabled": payload.enabled,
+        "timeout_s": payload.timeout_s,
+    }
+    stored.append(new_entry)
+    save_stored_providers(stored)
+    await sync_router_providers(services.router)
+
+    return {"ok": True, "id": next_id, "message": "Provider created and saved to disk."}
 
 
 @router.put("/providers/{provider_id}", dependencies=[Depends(require_admin)])
@@ -305,34 +318,33 @@ async def update_provider(provider_id: str, payload: ProviderPayload, request: R
         except Exception:
             pass
 
-    # In-memory mode
-    updated_list = []
+    # File-backed persistence
+    stored = load_stored_providers()
     found = False
-    for idx, p in enumerate(services.router.providers):
+    for p in stored:
         is_target = (
-            p.name == payload.name
-            or p.name == provider_id
-            or (provider_id.isdigit() and int(provider_id) == idx + 1)
+            str(p.get("id")) == str(provider_id)
+            or p.get("name") == provider_id
+            or p.get("name") == payload.name
         )
-        if is_target and not found:
+        if is_target:
             found = True
-            updated_list.append(ServiceProvider(
-                name=payload.name,
-                base_url=payload.base_url.rstrip("/"),
-                api_key=payload.api_key or p.api_key,
-                model=payload.model,
-                priority=payload.priority,
-                enabled=payload.enabled,
-                timeout_s=payload.timeout_s,
-            ))
-        else:
-            updated_list.append(p)
+            p["name"] = payload.name
+            p["base_url"] = payload.base_url.rstrip("/")
+            if payload.api_key:
+                p["api_key"] = payload.api_key
+            p["model"] = payload.model
+            p["priority"] = payload.priority
+            p["enabled"] = payload.enabled
+            p["timeout_s"] = payload.timeout_s
+            break
 
     if not found:
         raise HTTPException(status_code=404, detail=f"Provider '{provider_id}' not found.")
-    services.router.reload_providers(updated_list)
 
-    return {"ok": True, "message": "Provider updated and router reloaded."}
+    save_stored_providers(stored)
+    await sync_router_providers(services.router)
+    return {"ok": True, "message": "Provider updated and saved to disk."}
 
 
 @router.delete("/providers/{provider_id}", dependencies=[Depends(require_admin)])
@@ -357,24 +369,21 @@ async def delete_provider(provider_id: str, request: Request):
         except Exception:
             pass
 
-    # In-memory mode
-    new_list = []
-    found = False
-    for idx, p in enumerate(services.router.providers):
-        is_target = (
-            p.name == provider_id
-            or (provider_id.isdigit() and int(provider_id) == idx + 1)
-        )
-        if is_target and not found:
-            found = True
-            continue
-        new_list.append(p)
+    # File-backed persistence
+    stored = load_stored_providers()
+    orig_len = len(stored)
+    stored = [
+        p for p in stored
+        if str(p.get("id")) != str(provider_id) and p.get("name") != provider_id
+    ]
 
-    if not found:
+    if len(stored) == orig_len:
         raise HTTPException(status_code=404, detail=f"Provider '{provider_id}' not found.")
 
-    services.router.reload_providers(new_list)
-    return {"ok": True, "message": "Provider deleted and router reloaded."}
+    save_stored_providers(stored)
+    await sync_router_providers(services.router)
+    return {"ok": True, "message": "Provider deleted and removed from disk."}
+
 
 
 @router.post("/providers/test", dependencies=[Depends(require_admin)])

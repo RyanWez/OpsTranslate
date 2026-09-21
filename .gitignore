@@ -30,6 +30,8 @@ Thumbs.db
 
 # Local run artefacts
 *.log
+data/
+
 
 # Node & Frontend
 node_modules/
