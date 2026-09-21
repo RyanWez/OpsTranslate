@@ -83,7 +83,7 @@ function sendToPlayground(conceptHit?: string) {
     playgroundStore.inputText = `Testing concept: ${conceptHit}`
   }
   showDetailDrawer.value = false
-  router.push('/admin/playground')
+  router.push({ name: 'playground' })
 }
 
 function exportToCsv() {

@@ -18,15 +18,7 @@ function renderIcon(icon: Component) {
   return () => h(NIcon, null, { default: () => h(icon) })
 }
 
-const activeKey = computed(() => {
-  const path = route.path
-  if (path.includes('/policy')) return 'policy'
-  if (path.includes('/providers')) return 'providers'
-  if (path.includes('/users')) return 'users'
-  if (path.includes('/playground')) return 'playground'
-  if (path.includes('/logs')) return 'logs'
-  return 'overview'
-})
+const activeKey = computed(() => (route.name as string) || 'overview')
 
 const menuOptions = [
   {
@@ -62,8 +54,7 @@ const menuOptions = [
 ]
 
 function handleUpdateValue(key: string) {
-  if (key === 'overview') router.push('/admin')
-  else router.push(`/admin/${key}`)
+  router.push({ name: key })
 }
 </script>
 

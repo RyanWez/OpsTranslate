@@ -23,7 +23,7 @@ async function handleLogin() {
     const success = await authStore.login(password.value)
     if (success) {
       message.success('Authentication successful')
-      router.push('/admin')
+      router.push({ name: 'overview' })
     } else {
       message.error('Incorrect admin password')
     }
