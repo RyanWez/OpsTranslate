@@ -288,7 +288,9 @@ async def on_text(message: Message, services: Services, bot: Bot) -> None:
 def setup(router_services: Services, dp) -> None:
     """Make the Services object available to handlers via workflow data."""
     dp["services"] = router_services
-    dp.include_router(router)
+    if router.parent_router != dp:
+        router._parent_router = None
+        dp.include_router(router)
 
 
 # ---------------------------------------------------------------------------

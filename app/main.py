@@ -114,6 +114,13 @@ async def lifespan(app: FastAPI):
     app.state.dp = dp
     app.state.bot = bot
 
+    # Initial DB sync for dynamic providers if available
+    try:
+        from .store.providers import sync_router_providers
+        await sync_router_providers(services.router)
+    except Exception:
+        log.warning("initial_provider_sync_failed", exc_info=True)
+
     polling_task = None
     if config.MODE == "polling":
         import asyncio
@@ -183,7 +190,24 @@ async def lifespan(app: FastAPI):
     await bot.session.close()
 
 
+from pathlib import Path
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from .admin import router as admin_router
+
 app = FastAPI(title="OpsTranslate Bot", lifespan=lifespan)
+
+# Mount Admin API
+app.include_router(admin_router)
+
+# Mount Admin Static UI
+_static_dir = Path(__file__).parent / "static" / "admin"
+app.mount("/admin-static", StaticFiles(directory=_static_dir), name="admin-static")
+
+
+@app.get("/admin", response_class=FileResponse)
+async def admin_page():
+    return FileResponse(_static_dir / "index.html")
 
 
 @app.get("/")
@@ -192,6 +216,7 @@ async def root():
         "status": "ok",
         "app": "OpsTranslate Bot",
         "mode": config.MODE,
+        "admin": "/admin",
         "health": "/healthz",
     }
 

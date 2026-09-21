@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OpsTranslate Control Center</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/admin-static/admin.css">
+</head>
+<body>
+  <!-- Login Screen -->
+  <div id="login-container" class="login-wrapper">
+    <div class="login-card glass-panel">
+      <div class="login-brand">
+        <div class="brand-logo">🌐</div>
+        <h2>OpsTranslate</h2>
+        <p class="subtitle">Control Center & Gateway</p>
+      </div>
+      <form id="login-form" onsubmit="handleLogin(event)">
+        <div class="form-group">
+          <label for="admin-password">Admin Password</label>
+          <input type="password" id="admin-password" placeholder="Enter admin password" required autocomplete="current-password">
+        </div>
+        <button type="submit" id="login-submit-btn" class="btn btn-primary btn-block">
+          <span class="btn-text">Authenticate</span>
+          <span class="btn-loader" style="display:none;"></span>
+        </button>
+        <p id="login-error" class="error-msg" style="display:none;"></p>
+      </form>
+    </div>
+  </div>
+
+  <!-- Main App Shell -->
+  <div id="app-container" class="app-wrapper" style="display:none;">
+    <!-- Top Header -->
+    <header class="top-header glass-panel">
+      <div class="header-left">
+        <div class="brand-badge">
+          <span class="brand-icon">🌐</span>
+          <span class="brand-title">OpsTranslate</span>
+          <span class="brand-env-badge" id="header-mode-badge">POLLING</span>
+        </div>
+        <div class="live-pill" id="system-live-pill">
+          <span class="status-dot green"></span>
+          <span class="live-text" id="system-status-text">System Operational</span>
+        </div>
+      </div>
+      <div class="header-right">
+        <span class="server-time" id="server-clock">--:--:--</span>
+        <button id="refresh-btn" class="btn btn-icon" onclick="refreshCurrentView()" title="Refresh">↻</button>
+        <button id="logout-btn" class="btn btn-outline" onclick="handleLogout()">Logout</button>
+      </div>
+    </header>
+
+    <div class="main-body">
+      <!-- Sidebar Navigation -->
+      <nav class="sidebar glass-panel">
+        <ul class="nav-list">
+          <li>
+            <button class="nav-item active" data-tab="overview" onclick="switchTab('overview')">
+              <span class="nav-icon">📊</span>
+              <span class="nav-label">Overview</span>
+            </button>
+          </li>
+          <li>
+            <button class="nav-item" data-tab="providers" onclick="switchTab('providers')">
+              <span class="nav-icon">⚡</span>
+              <span class="nav-label">AI Providers</span>
+              <span class="badge" id="nav-provider-count">0</span>
+            </button>
+          </li>
+          <li>
+            <button class="nav-item" data-tab="users" onclick="switchTab('users')">
+              <span class="nav-icon">👥</span>
+              <span class="nav-label">Staff & Access</span>
+            </button>
+          </li>
+          <li>
+            <button class="nav-item" data-tab="playground" onclick="switchTab('playground')">
+              <span class="nav-icon">🧪</span>
+              <span class="nav-label">Playground</span>
+            </button>
+          </li>
+          <li>
+            <button class="nav-item" data-tab="logs" onclick="switchTab('logs')">
+              <span class="nav-icon">📜</span>
+              <span class="nav-label">Audit Logs</span>
+            </button>
+          </li>
+        </ul>
+
+        <div class="sidebar-footer">
+          <div class="policy-indicator">
+            <span class="indicator-title">Term Policy Engine</span>
+            <span class="indicator-val">v1 (Strict Zero-Gaming)</span>
+          </div>
+        </div>
+      </nav>
+
+      <!-- Main Content Area -->
+      <main class="content-viewport">
+        <!-- Tab: Overview -->
+        <section id="tab-overview" class="tab-pane active">
+          <div class="section-header">
+            <h2>System Health & Performance</h2>
+            <p class="section-desc">Real-time status of message pipeline, circuit breakers, and storage</p>
+          </div>
+
+          <div class="stats-grid">
+            <div class="stat-card glass-panel">
+              <div class="stat-label">Active Providers</div>
+              <div class="stat-value" id="stat-provider-count">-</div>
+              <div class="stat-meta" id="stat-provider-meta">Failover chain active</div>
+            </div>
+            <div class="stat-card glass-panel">
+              <div class="stat-label">Database (Postgres)</div>
+              <div class="stat-value" id="stat-db-status">-</div>
+              <div class="stat-meta" id="stat-db-meta">Neon cloud storage</div>
+            </div>
+            <div class="stat-card glass-panel">
+              <div class="stat-label">Cache / Idempotency</div>
+              <div class="stat-value" id="stat-redis-status">-</div>
+              <div class="stat-meta" id="stat-redis-meta">Upstash Redis</div>
+            </div>
+            <div class="stat-card glass-panel">
+              <div class="stat-label">Today's Cost (Est.)</div>
+              <div class="stat-value" id="stat-today-spend">$0.00</div>
+              <div class="stat-meta">Daily budget guard active</div>
+            </div>
+          </div>
+
+          <div class="card glass-panel mt-4">
+            <div class="card-header">
+              <h3>Circuit Breaker States</h3>
+              <button class="btn btn-sm btn-outline" onclick="loadOverview()">Check Status</button>
+            </div>
+            <div class="breaker-grid" id="overview-breakers-list">
+              <!-- Loaded dynamically -->
+            </div>
+          </div>
+        </section>
+
+        <!-- Tab: Providers -->
+        <section id="tab-providers" class="tab-pane">
+          <div class="section-header flex-between">
+            <div>
+              <h2>AI Providers & Failover Pool</h2>
+              <p class="section-desc">Manage upstream models, API endpoints, priorities, and zero-downtime hot reloading</p>
+            </div>
+            <button id="add-provider-btn" class="btn btn-primary" onclick="openAddProviderModal()">+ Add Provider</button>
+          </div>
+
+          <div class="table-card glass-panel mt-3">
+            <table class="data-table" id="providers-table">
+              <thead>
+                <tr>
+                  <th style="width: 80px;">Priority</th>
+                  <th>Name</th>
+                  <th>Model</th>
+                  <th>Base URL</th>
+                  <th>API Key</th>
+                  <th>Timeout</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="providers-table-body">
+                <!-- Loaded dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Tab: Users -->
+        <section id="tab-users" class="tab-pane">
+          <div class="section-header flex-between">
+            <div>
+              <h2>Staff & User Access Control</h2>
+              <p class="section-desc">Manage Telegram staff allowlist, admin roles, and individual daily soft caps</p>
+            </div>
+            <button id="add-user-btn" class="btn btn-primary" onclick="openAddUserModal()">+ Add Staff User</button>
+          </div>
+
+          <div class="table-card glass-panel mt-3">
+            <table class="data-table" id="users-table">
+              <thead>
+                <tr>
+                  <th>Telegram User ID</th>
+                  <th>Display Name</th>
+                  <th>Role</th>
+                  <th>Daily Cap</th>
+                  <th>Active</th>
+                  <th>Added At</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="users-table-body">
+                <!-- Loaded dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Tab: Playground -->
+        <section id="tab-playground" class="tab-pane">
+          <div class="section-header">
+            <h2>Translation & Policy Playground</h2>
+            <p class="section-desc">Test real-time policy masking, script auto-detection, zero-gaming sanitization, and output</p>
+          </div>
+
+          <div class="playground-layout">
+            <div class="playground-input-card glass-panel">
+              <div class="form-group">
+                <label for="play-input-text">Input Message (Burmese or English)</label>
+                <textarea id="play-input-text" rows="5" placeholder="ရိုက်ထည့်ပါ... e.g. ဒီ ကစားသမားရဲ့ withdrawal ဖုန်းနံပါတ် ပြည့်တော့မယ်..."></textarea>
+              </div>
+
+              <div class="form-row">
+                <div class="form-group flex-1">
+                  <label for="play-dst-lang">Target Language</label>
+                  <select id="play-dst-lang">
+                    <option value="">Auto Detect (MM ↔ EN)</option>
+                    <option value="en">English (en)</option>
+                    <option value="my">Myanmar (my)</option>
+                  </select>
+                </div>
+                <div class="form-group flex-initial" style="align-self: flex-end;">
+                  <button id="play-run-btn" class="btn btn-primary" onclick="runPlayground()">
+                    <span>Translate & Scan</span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="quick-samples mt-2">
+                <span class="sample-title">Quick Samples:</span>
+                <button class="chip" onclick="loadSample(1)">ကစားသမား ID</button>
+                <button class="chip" onclick="loadSample(2)">ပုံမှန်ကစားနေကျ fan</button>
+                <button class="chip" onclick="loadSample(3)">Withdrawal Points Limit</button>
+              </div>
+            </div>
+
+            <div class="playground-results-card glass-panel">
+              <h3>Pipeline Diagnostics</h3>
+              <div id="play-empty-state" class="empty-state">
+                Enter text and click Translate & Scan to see policy transformations.
+              </div>
+              <div id="play-result-details" style="display:none;">
+                <div class="diag-meta-row">
+                  <span class="meta-item">Source: <b id="diag-src">my</b></span>
+                  <span class="meta-item">Target: <b id="diag-dst">en</b></span>
+                  <span class="meta-item">Provider: <b id="diag-provider">-</b></span>
+                  <span class="meta-item">Latency: <b id="diag-latency">- ms</b></span>
+                </div>
+
+                <div class="diag-block mt-3">
+                  <div class="diag-header">1. Masked Input (Sent to LLM)</div>
+                  <pre class="diag-code" id="diag-masked"></pre>
+                </div>
+
+                <div class="diag-block mt-3">
+                  <div class="diag-header">2. Policy Concepts Matched</div>
+                  <div class="tags-container" id="diag-policy-hits"></div>
+                </div>
+
+                <div class="diag-block mt-3">
+                  <div class="diag-header">3. Final Delivered Translation</div>
+                  <div class="final-output-box" id="diag-final"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Tab: Logs -->
+        <section id="tab-logs" class="tab-pane">
+          <div class="section-header">
+            <h2>Audit & Metadata Logs</h2>
+            <p class="section-desc">Privacy-preserving metadata (character lengths, latencies, provider failovers)</p>
+          </div>
+
+          <div class="table-card glass-panel mt-3">
+            <table class="data-table" id="logs-table">
+              <thead>
+                <tr>
+                  <th>Timestamp</th>
+                  <th>User ID</th>
+                  <th>Chars</th>
+                  <th>Provider</th>
+                  <th>Latency</th>
+                  <th>Status</th>
+                  <th>Policy Hits</th>
+                </tr>
+              </thead>
+              <tbody id="logs-table-body">
+                <!-- Loaded dynamically -->
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <!-- Provider Modal -->
+  <div id="provider-modal" class="modal-backdrop" style="display:none;">
+    <div class="modal-card glass-panel">
+      <div class="modal-header">
+        <h3 id="modal-provider-title">Add AI Provider</h3>
+        <button class="btn btn-close" onclick="closeProviderModal()">✕</button>
+      </div>
+      <form id="provider-form" onsubmit="saveProvider(event)">
+        <input type="hidden" id="p-id">
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label for="p-name">Provider Identifier</label>
+            <input type="text" id="p-name" placeholder="e.g. vsllm-primary, openai-backup" required>
+          </div>
+          <div class="form-group flex-1">
+            <label for="p-priority">Failover Priority</label>
+            <input type="number" id="p-priority" min="1" max="100" value="1" required>
+            <small class="helper-text">1 = Highest (Primary)</small>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="p-base-url">Base URL</label>
+          <input type="url" id="p-base-url" placeholder="https://vsllm.cc/v1 or https://api.openai.com/v1" required>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label for="p-model">Model ID</label>
+            <input type="text" id="p-model" placeholder="e.g. gemini-3.1-flash-lite, gpt-4o-mini" required>
+          </div>
+          <div class="form-group flex-1">
+            <label for="p-timeout">Timeout (seconds)</label>
+            <input type="number" id="p-timeout" min="1" max="120" value="15" step="0.5" required>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="p-api-key">API Key</label>
+          <input type="password" id="p-api-key" placeholder="sk-..." autocomplete="off">
+          <small class="helper-text">Leave blank when editing to keep existing key unchanged</small>
+        </div>
+
+        <div class="form-group checkbox-row">
+          <label class="switch">
+            <input type="checkbox" id="p-enabled" checked>
+            <span class="slider"></span>
+          </label>
+          <span>Enable this provider in failover pool</span>
+        </div>
+
+        <div id="provider-test-result" class="test-result-box" style="display:none;"></div>
+
+        <div class="modal-footer flex-between mt-4">
+          <button type="button" class="btn btn-secondary" onclick="testCurrentProviderForm()">
+            ⚡ Test Connection
+          </button>
+          <div>
+            <button type="button" class="btn btn-outline" onclick="closeProviderModal()">Cancel</button>
+            <button type="submit" class="btn btn-primary">Save Provider</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- User Modal -->
+  <div id="user-modal" class="modal-backdrop" style="display:none;">
+    <div class="modal-card glass-panel">
+      <div class="modal-header">
+        <h3 id="modal-user-title">Add Staff User</h3>
+        <button class="btn btn-close" onclick="closeUserModal()">✕</button>
+      </div>
+      <form id="user-form" onsubmit="saveUser(event)">
+        <div class="form-group">
+          <label for="u-id">Telegram User ID</label>
+          <input type="number" id="u-id" placeholder="e.g. 123456789" required>
+        </div>
+        <div class="form-group">
+          <label for="u-name">Display Name (Optional)</label>
+          <input type="text" id="u-name" placeholder="e.g. John (Support)">
+        </div>
+        <div class="form-row">
+          <div class="form-group flex-1">
+            <label for="u-role">Role</label>
+            <select id="u-role">
+              <option value="staff">Staff</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+          <div class="form-group flex-1">
+            <label for="u-cap">Daily Soft Cap</label>
+            <input type="number" id="u-cap" value="200" min="1" max="5000">
+          </div>
+        </div>
+        <div class="form-group checkbox-row">
+          <label class="switch">
+            <input type="checkbox" id="u-active" checked>
+            <span class="slider"></span>
+          </label>
+          <span>Active (allow access)</span>
+        </div>
+        <div class="modal-footer flex-end mt-4">
+          <button type="button" class="btn btn-outline" onclick="closeUserModal()">Cancel</button>
+          <button type="submit" class="btn btn-primary">Save User</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <script src="/admin-static/admin.js"></script>
+</body>
+</html>

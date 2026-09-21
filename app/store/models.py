@@ -76,6 +76,16 @@ class Provider(Base):
         DateTime(timezone=True), default=_utcnow
     )
 
+    @property
+    def api_key(self) -> str:
+        if self.api_key_enc:
+            return self.api_key_enc.decode("utf-8", errors="ignore")
+        return ""
+
+    @api_key.setter
+    def api_key(self, val: str) -> None:
+        self.api_key_enc = val.encode("utf-8") if val else None
+
 
 class ProviderHealth(Base):
     __tablename__ = "provider_health"

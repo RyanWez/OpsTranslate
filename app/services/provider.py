@@ -116,6 +116,16 @@ class ProviderRouter:
     def states(self) -> dict[str, str]:
         return {name: b.state for name, b in self.breakers.items()}
 
+    def reload_providers(self, providers: list[Provider]) -> None:
+        """Dynamically replace provider pool and update breaker states."""
+        self.providers = sorted(
+            [p for p in providers if p.enabled], key=lambda p: p.priority
+        )
+        new_breakers = {}
+        for p in self.providers:
+            new_breakers[p.name] = self.breakers.get(p.name, _Breaker())
+        self.breakers = new_breakers
+
     def any_closed(self) -> bool:
         now = time.monotonic()
         return any(b.can_try(now) for b in self.breakers.values())
