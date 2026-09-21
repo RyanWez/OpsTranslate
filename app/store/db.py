@@ -29,11 +29,25 @@ def get_engine():
 
         from .. import config
 
+        import urllib.parse
+
         url = config.DATABASE_URL
         if url.startswith("postgresql://"):
             url = "postgresql+asyncpg://" + url[len("postgresql://"):]
+
+        parsed = urllib.parse.urlparse(url)
+        query_params = urllib.parse.parse_qs(parsed.query)
+        connect_args = {}
+        if "sslmode" in query_params or "ssl" in query_params:
+            connect_args["ssl"] = "require"
+        query_params.pop("sslmode", None)
+        query_params.pop("channel_binding", None)
+        new_query = urllib.parse.urlencode({k: v[0] for k, v in query_params.items()})
+        cleaned_url = urllib.parse.urlunparse(parsed._replace(query=new_query))
+
         _engine = create_async_engine(
-            url,
+            cleaned_url,
+            connect_args=connect_args,
             pool_pre_ping=True,
             pool_recycle=300,
         )
