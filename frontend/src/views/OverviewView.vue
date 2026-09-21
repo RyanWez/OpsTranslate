@@ -153,6 +153,88 @@ const circuitCount = computed(() => {
         </NCard>
       </div>
 
+      <!-- Telemetry Chart Card -->
+      <NCard class="glass-panel border-gray-800 rounded-xl mt-6" :bordered="false">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+          <div class="flex items-center space-x-2">
+            <span class="text-sm font-semibold text-gray-200">Gateway Telemetry & Traffic Trend</span>
+            <span class="relative flex h-2 w-2">
+              <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+            </span>
+            <span class="text-[11px] text-emerald-400 font-mono">Live</span>
+          </div>
+          <div class="flex items-center space-x-4 text-xs">
+            <div class="flex items-center space-x-1.5">
+              <span class="w-2.5 h-2.5 rounded-full bg-cyan-400"></span>
+              <span class="text-gray-400">Request Throughput</span>
+            </div>
+            <div class="flex items-center space-x-1.5">
+              <span class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
+              <span class="text-gray-400">P95 Latency</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="w-full h-44 relative">
+          <svg viewBox="0 0 800 160" class="w-full h-full overflow-visible">
+            <defs>
+              <linearGradient id="grad-cyan" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#06b6d4" stop-opacity="0.35" />
+                <stop offset="100%" stop-color="#06b6d4" stop-opacity="0.0" />
+              </linearGradient>
+              <linearGradient id="grad-emerald" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stop-color="#10b981" stop-opacity="0.25" />
+                <stop offset="100%" stop-color="#10b981" stop-opacity="0.0" />
+              </linearGradient>
+            </defs>
+
+            <!-- Grid Lines -->
+            <line x1="0" y1="30" x2="800" y2="30" stroke="rgba(255,255,255,0.04)" stroke-dasharray="4" />
+            <line x1="0" y1="75" x2="800" y2="75" stroke="rgba(255,255,255,0.04)" stroke-dasharray="4" />
+            <line x1="0" y1="120" x2="800" y2="120" stroke="rgba(255,255,255,0.04)" stroke-dasharray="4" />
+
+            <!-- Cyan Throughput Area & Line -->
+            <path
+              d="M0,130 C120,120 180,60 260,85 C340,110 400,30 480,45 C560,60 640,115 720,70 C760,50 780,40 800,45 L800,150 L0,150 Z"
+              fill="url(#grad-cyan)"
+            />
+            <path
+              d="M0,130 C120,120 180,60 260,85 C340,110 400,30 480,45 C560,60 640,115 720,70 C760,50 780,40 800,45"
+              fill="none"
+              stroke="#06b6d4"
+              stroke-width="2.5"
+            />
+
+            <!-- Emerald Latency Area & Line -->
+            <path
+              d="M0,140 C140,135 220,105 300,115 C400,125 480,95 580,100 C680,105 740,80 800,85 L800,150 L0,150 Z"
+              fill="url(#grad-emerald)"
+            />
+            <path
+              d="M0,140 C140,135 220,105 300,115 C400,125 480,95 580,100 C680,105 740,80 800,85"
+              fill="none"
+              stroke="#10b981"
+              stroke-width="2"
+            />
+
+            <!-- Highlight Pulse Point -->
+            <circle cx="480" cy="45" r="5" fill="#06b6d4" class="animate-pulse" />
+            <circle cx="480" cy="45" r="9" fill="none" stroke="#06b6d4" stroke-opacity="0.5" />
+          </svg>
+        </div>
+
+        <div class="flex justify-between text-[11px] font-mono text-gray-500 mt-2 border-t border-gray-800/60 pt-2">
+          <span>00:00</span>
+          <span>04:00</span>
+          <span>08:00</span>
+          <span>12:00</span>
+          <span>16:00</span>
+          <span>20:00</span>
+          <span class="text-cyan-400 font-semibold">Live (Now)</span>
+        </div>
+      </NCard>
+
       <!-- Circuit Breakers Detailed Grid -->
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
         <NCard class="glass-panel border-gray-800 rounded-xl lg:col-span-2" :bordered="false" title="AI Provider Circuit Breakers">

@@ -9,6 +9,7 @@ import type {
   UserPayload,
   PlaygroundResult,
   UsageLogItem,
+  PolicyData,
 } from '../types'
 
 export const api = {
@@ -19,6 +20,9 @@ export const api = {
 
   // Overview
   getOverview: () => apiClient.get<OverviewStats>('/overview'),
+
+  // Policy
+  getPolicy: () => apiClient.get<PolicyData>('/policy'),
 
   // Providers
   getProviders: () => apiClient.get<{ providers: ProviderItem[] }>('/providers'),

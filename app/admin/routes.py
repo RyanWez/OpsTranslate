@@ -139,6 +139,29 @@ async def get_overview(request: Request):
     }
 
 
+# ---- Policy & Term Glossary -----------------------------------------------
+
+@router.get("/policy", dependencies=[Depends(require_admin)])
+async def get_policy():
+    from ..policy.policy_data import CONCEPTS, DENY_TERMS
+    concepts_out = []
+    for c in CONCEPTS:
+        concepts_out.append({
+            "key": c.key,
+            "approved": c.approved,
+            "enabled": c.enabled,
+            "variants_my": c.variants.get("my", []),
+            "variants_en": c.variants.get("en", []),
+            "variants_zh": c.variants.get("zh", []),
+            "outputs": c.outputs,
+        })
+    return {
+        "version": config.POLICY_VERSION,
+        "concepts": concepts_out,
+        "deny_terms": DENY_TERMS,
+    }
+
+
 # ---- Provider Management --------------------------------------------------
 
 def _mask_key(key: str) -> str:

@@ -8,6 +8,7 @@ import ProvidersView from '../views/ProvidersView.vue'
 import UsersView from '../views/UsersView.vue'
 import PlaygroundView from '../views/PlaygroundView.vue'
 import LogsView from '../views/LogsView.vue'
+import PolicyView from '../views/PolicyView.vue'
 
 const routes: RouteRecordRaw[] = [
   {
@@ -25,6 +26,11 @@ const routes: RouteRecordRaw[] = [
         path: '',
         name: 'overview',
         component: OverviewView,
+      },
+      {
+        path: 'policy',
+        name: 'policy',
+        component: PolicyView,
       },
       {
         path: 'providers',

@@ -8,6 +8,7 @@ import {
   PeopleOutline,
   FlaskOutline,
   DocumentTextOutline,
+  ShieldCheckmarkOutline,
 } from '@vicons/ionicons5'
 
 const route = useRoute()
@@ -19,6 +20,7 @@ function renderIcon(icon: Component) {
 
 const activeKey = computed(() => {
   const path = route.path
+  if (path.includes('/policy')) return 'policy'
   if (path.includes('/providers')) return 'providers'
   if (path.includes('/users')) return 'users'
   if (path.includes('/playground')) return 'playground'
@@ -31,6 +33,11 @@ const menuOptions = [
     label: 'Overview',
     key: 'overview',
     icon: renderIcon(StatsChartOutline),
+  },
+  {
+    label: 'Term Policy',
+    key: 'policy',
+    icon: renderIcon(ShieldCheckmarkOutline),
   },
   {
     label: 'AI Providers',

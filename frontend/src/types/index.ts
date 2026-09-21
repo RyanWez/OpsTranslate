@@ -93,3 +93,19 @@ export interface UsageLogItem {
   policy_hits: string[]
   created_at: string | null
 }
+
+export interface PolicyConcept {
+  key: string
+  approved: boolean
+  enabled: boolean
+  variants_my: string[]
+  variants_en: string[]
+  variants_zh: string[]
+  outputs: Record<string, string>
+}
+
+export interface PolicyData {
+  version: string | number
+  concepts: PolicyConcept[]
+  deny_terms: Record<string, string[]>
+}
