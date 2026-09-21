@@ -22,22 +22,24 @@ def verify_password(password: str) -> bool:
     return hmac.compare_digest(password.strip(), expected.strip())
 
 
-def is_authenticated(request: Request, admin_session: Optional[str] = Cookie(None), authorization: Optional[str] = Header(None)) -> bool:
+def is_authenticated(request: Request) -> bool:
     expected = get_expected_token()
     # Check cookie
-    if admin_session and hmac.compare_digest(admin_session, expected):
+    cookie_token = request.cookies.get("admin_session")
+    if cookie_token and isinstance(cookie_token, str) and hmac.compare_digest(cookie_token, expected):
         return True
     # Check header: Authorization: Bearer <token>
-    if authorization:
-        parts = authorization.split()
+    auth_header = request.headers.get("Authorization") or request.headers.get("authorization")
+    if auth_header and isinstance(auth_header, str):
+        parts = auth_header.split()
         if len(parts) == 2 and parts[0].lower() == "bearer":
             if hmac.compare_digest(parts[1], expected):
                 return True
     return False
 
 
-async def require_admin(request: Request, admin_session: Optional[str] = Cookie(None), authorization: Optional[str] = Header(None)) -> bool:
-    if not is_authenticated(request, admin_session, authorization):
+async def require_admin(request: Request) -> bool:
+    if not is_authenticated(request):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Admin authentication required.",
