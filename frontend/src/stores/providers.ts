@@ -19,7 +19,7 @@ export const useProvidersStore = defineStore('providers', () => {
     }
   }
 
-  async function saveProvider(id: number | null, payload: ProviderPayload): Promise<boolean> {
+  async function saveProvider(id: number | string | null, payload: ProviderPayload): Promise<boolean> {
     loading.value = true
     try {
       if (id !== null) {
@@ -34,7 +34,7 @@ export const useProvidersStore = defineStore('providers', () => {
     }
   }
 
-  async function deleteProvider(id: number): Promise<boolean> {
+  async function deleteProvider(id: number | string): Promise<boolean> {
     loading.value = true
     try {
       await api.deleteProvider(id)

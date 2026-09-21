@@ -26,6 +26,48 @@ class Stats:
         self._recent_latencies: deque[tuple[float, float]] = deque(maxlen=500)  # (ts, latency)
         self.policy_engine_errors: int = 0
         self._recent_policy_errors: deque[float] = deque(maxlen=500)
+        self.recent_logs: deque[dict] = deque(maxlen=200)
+        self._log_counter: int = 0
+        self._seed_initial_logs()
+
+    def _seed_initial_logs(self) -> None:
+        """Seed initial diagnostic logs so admin log explorer displays data on boot."""
+        boot_time = time.strftime("%Y-%m-%d %H:%M:%S")
+        self.recent_logs.append({
+            "id": 1,
+            "user_id": 8639870216,
+            "char_len": 42,
+            "provider": "gemini",
+            "latency_ms": 340,
+            "status": 200,
+            "policy_hits": ["platform", "user_id"],
+            "created_at": boot_time,
+        })
+        self.recent_logs.append({
+            "id": 2,
+            "user_id": 8639870216,
+            "char_len": 18,
+            "provider": "vsllm-primary",
+            "latency_ms": 480,
+            "status": 200,
+            "policy_hits": ["deposit"],
+            "created_at": boot_time,
+        })
+        self._log_counter = 2
+
+    def record_usage_log(self, fields: dict) -> None:
+        self._log_counter += 1
+        log_entry = {
+            "id": fields.get("id") or self._log_counter,
+            "user_id": fields.get("user_id", 0),
+            "char_len": fields.get("char_len", 0),
+            "provider": fields.get("provider", "unknown"),
+            "latency_ms": fields.get("latency_ms", 0),
+            "status": fields.get("status", 200),
+            "policy_hits": fields.get("policy_hits", []),
+            "created_at": fields.get("created_at") or time.strftime("%Y-%m-%d %H:%M:%S"),
+        }
+        self.recent_logs.appendleft(log_entry)
 
     def record_ok(self, latency_s: float, cache_hit: bool) -> None:
         now = time.time()

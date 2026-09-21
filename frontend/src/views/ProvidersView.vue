@@ -37,7 +37,7 @@ onMounted(() => {
 // Modal Add/Edit State
 const showModal = ref(false)
 const modalTitle = ref('Add AI Provider')
-const editingId = ref<number | null>(null)
+const editingTarget = ref<ProviderItem | null>(null)
 const formData = ref<ProviderPayload>({
   name: '',
   base_url: '',
@@ -49,7 +49,7 @@ const formData = ref<ProviderPayload>({
 })
 
 function openAddModal() {
-  editingId.value = null
+  editingTarget.value = null
   modalTitle.value = 'Add AI Provider'
   formData.value = {
     name: '',
@@ -64,7 +64,7 @@ function openAddModal() {
 }
 
 function openEditModal(row: ProviderItem) {
-  editingId.value = row.id
+  editingTarget.value = row
   modalTitle.value = `Edit Provider: ${row.name}`
   formData.value = {
     name: row.name,
@@ -85,9 +85,10 @@ async function handleSaveProvider() {
   }
 
   try {
-    const success = await providersStore.saveProvider(editingId.value, formData.value)
+    const targetId = editingTarget.value ? (editingTarget.value.id ?? editingTarget.value.name) : null
+    const success = await providersStore.saveProvider(targetId, formData.value)
     if (success) {
-      message.success(editingId.value ? 'Provider updated' : 'Provider created')
+      message.success(editingTarget.value ? 'Provider updated' : 'Provider created')
       showModal.value = false
     }
   } catch (err: any) {
@@ -102,12 +103,9 @@ function handleDeleteProvider(row: ProviderItem) {
     positiveText: 'Delete',
     negativeText: 'Cancel',
     onPositiveClick: async () => {
-      if (row.id === null) {
-        message.error('Cannot delete in-memory/env provider via database endpoint.')
-        return
-      }
       try {
-        await providersStore.deleteProvider(row.id)
+        const targetId = row.id !== null ? row.id : row.name
+        await providersStore.deleteProvider(targetId)
         message.success(`Provider '${row.name}' deleted`)
       } catch (err: any) {
         message.error(err.response?.data?.detail || 'Failed to delete provider')

@@ -379,6 +379,12 @@ async def _delete_placeholder(services: Services, chat_id: int, placeholder_id: 
 # ---------------------------------------------------------------------------
 
 async def log_usage(services: Services, **fields) -> None:
+    # Always record into in-memory ring buffer so admin logs view has telemetry
+    try:
+        services.stats.record_usage_log(fields)
+    except Exception:
+        pass
+
     from ..store import db as dbmod
     from ..store.models import UsageLog
 

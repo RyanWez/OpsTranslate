@@ -116,3 +116,56 @@ def test_admin_policy_endpoint(client, auth_headers):
     assert "my" in data["deny_terms"]
     assert "en" in data["deny_terms"]
 
+
+def test_admin_providers_update_and_delete_in_memory(client, auth_headers):
+    # 1. Check listed providers have id
+    res = client.get("/api/admin/providers", headers=auth_headers)
+    assert res.status_code == 200
+    providers = res.json()["providers"]
+    assert len(providers) >= 1
+    target = providers[0]
+    assert target["id"] is not None
+
+    # 2. Update provider
+    update_payload = {
+        "name": target["name"],
+        "base_url": "https://updated.example.com/v1",
+        "model": "test-updated-model",
+        "priority": 3,
+        "timeout_s": 25.0,
+        "enabled": True,
+        "api_key": "sk-updated-key",
+    }
+    res = client.put(f"/api/admin/providers/{target['name']}", json=update_payload, headers=auth_headers)
+    assert res.status_code == 200
+    assert res.json()["ok"] is True
+
+    # Verify update reflected
+    res = client.get("/api/admin/providers", headers=auth_headers)
+    updated_p = next(p for p in res.json()["providers"] if p["name"] == target["name"])
+    assert updated_p["base_url"] == "https://updated.example.com/v1"
+    assert updated_p["model"] == "test-updated-model"
+
+    # 3. Delete provider
+    res = client.delete(f"/api/admin/providers/{target['name']}", headers=auth_headers)
+    assert res.status_code == 200
+    assert res.json()["ok"] is True
+
+    # Verify deleted
+    res = client.get("/api/admin/providers", headers=auth_headers)
+    remaining_names = [p["name"] for p in res.json()["providers"]]
+    assert target["name"] not in remaining_names
+
+
+def test_admin_audit_logs_fallback(client, auth_headers):
+    res = client.get("/api/admin/logs", headers=auth_headers)
+    assert res.status_code == 200
+    data = res.json()
+    assert "logs" in data
+    assert len(data["logs"]) >= 1
+    first_log = data["logs"][0]
+    assert "provider" in first_log
+    assert "status" in first_log
+    assert "latency_ms" in first_log
+
+

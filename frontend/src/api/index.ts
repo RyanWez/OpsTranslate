@@ -27,8 +27,8 @@ export const api = {
   // Providers
   getProviders: () => apiClient.get<{ providers: ProviderItem[] }>('/providers'),
   createProvider: (payload: ProviderPayload) => apiClient.post<{ ok: boolean; id: number | null }>('/providers', payload),
-  updateProvider: (id: number, payload: ProviderPayload) => apiClient.put<{ ok: boolean }>(`/providers/${id}`, payload),
-  deleteProvider: (id: number) => apiClient.delete<{ ok: boolean }>(`/providers/${id}`),
+  updateProvider: (id: number | string, payload: ProviderPayload) => apiClient.put<{ ok: boolean }>(`/providers/${id}`, payload),
+  deleteProvider: (id: number | string) => apiClient.delete<{ ok: boolean }>(`/providers/${id}`),
   testProvider: (payload: { base_url: string; api_key: string; model: string; timeout_s?: number }) =>
     apiClient.post<TestProviderResult>('/providers/test', payload),
 

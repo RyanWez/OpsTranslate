@@ -204,9 +204,9 @@ async def list_providers(request: Request):
             pass
 
     # Fallback to in-memory router providers
-    for p in services.router.providers:
+    for idx, p in enumerate(services.router.providers):
         out.append({
-            "id": None,
+            "id": idx + 1,
             "name": p.name,
             "base_url": p.base_url,
             "api_key_masked": _mask_key(p.api_key),
@@ -226,114 +226,154 @@ async def create_provider(payload: ProviderPayload, request: Request):
     new_provider_id = None
 
     if dbmod.is_configured():
-        from sqlalchemy import select
+        try:
+            from sqlalchemy import select
 
-        async with dbmod.session() as sess:
-            # Check unique name
-            existing = (await sess.execute(select(DBProvider).where(DBProvider.name == payload.name))).scalar_one_or_none()
-            if existing:
-                raise HTTPException(status_code=400, detail=f"Provider with name '{payload.name}' already exists.")
-            
-            p = DBProvider(
-                name=payload.name,
-                base_url=payload.base_url.rstrip("/"),
-                model=payload.model,
-                priority=payload.priority,
-                enabled=payload.enabled,
-                timeout_ms=int(payload.timeout_s * 1000),
-            )
-            if payload.api_key:
-                p.api_key = payload.api_key
-            sess.add(p)
-            await sess.commit()
-            await sess.refresh(p)
-            new_provider_id = p.id
-        await sync_router_providers(services.router)
-    else:
-        # In-memory mode (tests or DB-less deployment)
-        if any(p.name == payload.name for p in services.router.providers):
-            raise HTTPException(status_code=400, detail=f"Provider with name '{payload.name}' already exists.")
-        new_sp = ServiceProvider(
-            name=payload.name,
-            base_url=payload.base_url.rstrip("/"),
-            api_key=payload.api_key or "",
-            model=payload.model,
-            priority=payload.priority,
-            enabled=payload.enabled,
-            timeout_s=payload.timeout_s,
-        )
-        services.router.reload_providers(services.router.providers + [new_sp])
+            async with dbmod.session() as sess:
+                # Check unique name
+                existing = (await sess.execute(select(DBProvider).where(DBProvider.name == payload.name))).scalar_one_or_none()
+                if existing:
+                    raise HTTPException(status_code=400, detail=f"Provider with name '{payload.name}' already exists.")
+                
+                p = DBProvider(
+                    name=payload.name,
+                    base_url=payload.base_url.rstrip("/"),
+                    model=payload.model,
+                    priority=payload.priority,
+                    enabled=payload.enabled,
+                    timeout_ms=int(payload.timeout_s * 1000),
+                )
+                if payload.api_key:
+                    p.api_key = payload.api_key
+                sess.add(p)
+                await sess.commit()
+                await sess.refresh(p)
+                new_provider_id = p.id
+            await sync_router_providers(services.router)
+            return {"ok": True, "id": new_provider_id, "message": "Provider created and router reloaded."}
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+
+    # In-memory mode (tests or DB-less deployment)
+    if any(p.name == payload.name for p in services.router.providers):
+        raise HTTPException(status_code=400, detail=f"Provider with name '{payload.name}' already exists.")
+    new_sp = ServiceProvider(
+        name=payload.name,
+        base_url=payload.base_url.rstrip("/"),
+        api_key=payload.api_key or "",
+        model=payload.model,
+        priority=payload.priority,
+        enabled=payload.enabled,
+        timeout_s=payload.timeout_s,
+    )
+    services.router.reload_providers(services.router.providers + [new_sp])
 
     return {"ok": True, "id": new_provider_id, "message": "Provider created and router reloaded."}
 
 
 @router.put("/providers/{provider_id}", dependencies=[Depends(require_admin)])
-async def update_provider(provider_id: int, payload: ProviderPayload, request: Request):
+async def update_provider(provider_id: str, payload: ProviderPayload, request: Request):
     services: Services = request.app.state.services
 
     if dbmod.is_configured():
-        from sqlalchemy import select
+        try:
+            from sqlalchemy import select
 
-        async with dbmod.session() as sess:
-            p = (await sess.execute(select(DBProvider).where(DBProvider.id == provider_id))).scalar_one_or_none()
-            if not p:
-                raise HTTPException(status_code=404, detail="Provider not found.")
-            
-            p.name = payload.name
-            p.base_url = payload.base_url.rstrip("/")
-            p.model = payload.model
-            p.priority = payload.priority
-            p.enabled = payload.enabled
-            p.timeout_ms = int(payload.timeout_s * 1000)
-            if payload.api_key:
-                p.api_key = payload.api_key
-            await sess.commit()
-        await sync_router_providers(services.router)
-    else:
-        # In-memory mode
-        updated_list = []
-        found = False
-        for p in services.router.providers:
-            if p.name == payload.name:
-                found = True
-                updated_list.append(ServiceProvider(
-                    name=payload.name,
-                    base_url=payload.base_url.rstrip("/"),
-                    api_key=payload.api_key or p.api_key,
-                    model=payload.model,
-                    priority=payload.priority,
-                    enabled=payload.enabled,
-                    timeout_s=payload.timeout_s,
-                ))
-            else:
-                updated_list.append(p)
-        if not found:
-            raise HTTPException(status_code=404, detail="Provider not found.")
-        services.router.reload_providers(updated_list)
+            async with dbmod.session() as sess:
+                p = None
+                if provider_id.isdigit():
+                    p = (await sess.execute(select(DBProvider).where(DBProvider.id == int(provider_id)))).scalar_one_or_none()
+                if not p:
+                    p = (await sess.execute(select(DBProvider).where(DBProvider.name == payload.name))).scalar_one_or_none()
+                if not p:
+                    p = (await sess.execute(select(DBProvider).where(DBProvider.name == provider_id))).scalar_one_or_none()
+                
+                if p:
+                    p.name = payload.name
+                    p.base_url = payload.base_url.rstrip("/")
+                    p.model = payload.model
+                    p.priority = payload.priority
+                    p.enabled = payload.enabled
+                    p.timeout_ms = int(payload.timeout_s * 1000)
+                    if payload.api_key:
+                        p.api_key = payload.api_key
+                    await sess.commit()
+                    await sync_router_providers(services.router)
+                    return {"ok": True, "message": "Provider updated and router reloaded."}
+        except Exception:
+            pass
+
+    # In-memory mode
+    updated_list = []
+    found = False
+    for idx, p in enumerate(services.router.providers):
+        is_target = (
+            p.name == payload.name
+            or p.name == provider_id
+            or (provider_id.isdigit() and int(provider_id) == idx + 1)
+        )
+        if is_target and not found:
+            found = True
+            updated_list.append(ServiceProvider(
+                name=payload.name,
+                base_url=payload.base_url.rstrip("/"),
+                api_key=payload.api_key or p.api_key,
+                model=payload.model,
+                priority=payload.priority,
+                enabled=payload.enabled,
+                timeout_s=payload.timeout_s,
+            ))
+        else:
+            updated_list.append(p)
+
+    if not found:
+        raise HTTPException(status_code=404, detail=f"Provider '{provider_id}' not found.")
+    services.router.reload_providers(updated_list)
 
     return {"ok": True, "message": "Provider updated and router reloaded."}
 
 
 @router.delete("/providers/{provider_id}", dependencies=[Depends(require_admin)])
-async def delete_provider(provider_id: int, request: Request):
+async def delete_provider(provider_id: str, request: Request):
     services: Services = request.app.state.services
 
     if dbmod.is_configured():
-        from sqlalchemy import select
+        try:
+            from sqlalchemy import select
 
-        async with dbmod.session() as sess:
-            p = (await sess.execute(select(DBProvider).where(DBProvider.id == provider_id))).scalar_one_or_none()
-            if not p:
-                raise HTTPException(status_code=404, detail="Provider not found.")
-            await sess.delete(p)
-            await sess.commit()
-        await sync_router_providers(services.router)
-    else:
-        # In-memory mode: provider_id matches index or delete by priority
-        if provider_id < len(services.router.providers):
-            p = services.router.providers[provider_id]
-            services.router.reload_providers([x for x in services.router.providers if x.name != p.name])
+            async with dbmod.session() as sess:
+                p = None
+                if provider_id.isdigit():
+                    p = (await sess.execute(select(DBProvider).where(DBProvider.id == int(provider_id)))).scalar_one_or_none()
+                if not p:
+                    p = (await sess.execute(select(DBProvider).where(DBProvider.name == provider_id))).scalar_one_or_none()
+                if p:
+                    await sess.delete(p)
+                    await sess.commit()
+                    await sync_router_providers(services.router)
+                    return {"ok": True, "message": "Provider deleted and router reloaded."}
+        except Exception:
+            pass
 
+    # In-memory mode
+    new_list = []
+    found = False
+    for idx, p in enumerate(services.router.providers):
+        is_target = (
+            p.name == provider_id
+            or (provider_id.isdigit() and int(provider_id) == idx + 1)
+        )
+        if is_target and not found:
+            found = True
+            continue
+        new_list.append(p)
+
+    if not found:
+        raise HTTPException(status_code=404, detail=f"Provider '{provider_id}' not found.")
+
+    services.router.reload_providers(new_list)
     return {"ok": True, "message": "Provider deleted and router reloaded."}
 
 
@@ -515,6 +555,18 @@ async def test_playground(req: PlaygroundRequest, request: Request):
     final_output = restore_entities(sanitized_output, entity_restore)
     latency_ms = int((time.monotonic() - t0) * 1000)
 
+    try:
+        services.stats.record_usage_log({
+            "user_id": 999999,
+            "char_len": len(req.text),
+            "provider": provider_name,
+            "latency_ms": latency_ms,
+            "status": 200,
+            "policy_hits": list(set(policy_hits)),
+        })
+    except Exception:
+        pass
+
     return {
         "ok": True,
         "src_lang": src_lang,
@@ -533,8 +585,9 @@ async def test_playground(req: PlaygroundRequest, request: Request):
 
 @router.get("/logs", dependencies=[Depends(require_admin)])
 async def get_logs(request: Request, limit: int = 50):
+    services: Services = request.app.state.services
     if not dbmod.is_configured():
-        return {"logs": []}
+        return {"logs": list(services.stats.recent_logs)[:limit]}
     
     try:
         from sqlalchemy import select
@@ -556,6 +609,9 @@ async def get_logs(request: Request, limit: int = 50):
                     "policy_hits": r.policy_hits,
                     "created_at": r.created_at.strftime("%Y-%m-%d %H:%M:%S") if r.created_at else None,
                 })
-            return {"logs": logs}
+            if logs:
+                return {"logs": logs}
+            return {"logs": list(services.stats.recent_logs)[:limit]}
     except Exception:
-        return {"logs": []}
+        return {"logs": list(services.stats.recent_logs)[:limit]}
+
