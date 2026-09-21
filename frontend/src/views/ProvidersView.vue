@@ -146,12 +146,51 @@ async function runPingTest() {
   }
 }
 
+function applyPreset(type: 'openai' | 'claude' | 'openrouter' | 'gemini') {
+  if (type === 'openai') {
+    formData.value.base_url = 'https://api.openai.com/v1'
+    formData.value.model = 'gpt-4o-mini'
+    if (!formData.value.name) formData.value.name = 'openai'
+  } else if (type === 'claude') {
+    formData.value.base_url = 'https://api.anthropic.com/v1'
+    formData.value.model = 'claude-3-5-sonnet-20241022'
+    if (!formData.value.name) formData.value.name = 'claude'
+  } else if (type === 'openrouter') {
+    formData.value.base_url = 'https://openrouter.ai/api/v1'
+    formData.value.model = 'anthropic/claude-3.5-sonnet'
+    if (!formData.value.name) formData.value.name = 'openrouter-claude'
+  } else if (type === 'gemini') {
+    formData.value.base_url = 'https://gemini-api.online/v1'
+    formData.value.model = 'gemini-3.8-flash-tiered'
+    if (!formData.value.name) formData.value.name = 'gemini'
+  }
+}
+
+async function handleToggleStatus(row: ProviderItem, val: boolean) {
+  row.enabled = val
+  try {
+    const targetId = row.id !== null ? row.id : row.name
+    await providersStore.saveProvider(targetId, {
+      name: row.name,
+      base_url: row.base_url,
+      model: row.model,
+      priority: row.priority,
+      enabled: val,
+      timeout_s: row.timeout_s,
+    })
+    message.success(`Provider '${row.name}' ${val ? 'resumed (Active)' : 'paused (Off)'}`)
+  } catch (err: any) {
+    row.enabled = !val
+    message.error(err.response?.data?.detail || 'Failed to update provider status')
+  }
+}
+
 // Table columns
 const columns = [
   {
     title: 'Priority',
     key: 'priority',
-    width: 90,
+    width: 80,
     render(row: ProviderItem) {
       return h(
         NTag,
@@ -165,10 +204,34 @@ const columns = [
     },
   },
   {
+    title: 'Status',
+    key: 'enabled',
+    width: 120,
+    render(row: ProviderItem) {
+      return h('div', { class: 'flex items-center space-x-2' }, [
+        h(NSwitch, {
+          size: 'small',
+          value: row.enabled,
+          onUpdateValue: (val: boolean) => handleToggleStatus(row, val),
+        }),
+        h(
+          'span',
+          {
+            class: [
+              'text-[11px] font-mono font-medium',
+              row.enabled ? 'text-emerald-400' : 'text-gray-500',
+            ],
+          },
+          row.enabled ? 'Active' : 'Off'
+        ),
+      ])
+    },
+  },
+  {
     title: 'Identifier & Model',
     key: 'name',
     render(row: ProviderItem) {
-      return h('div', { class: 'space-y-0.5' }, [
+      return h('div', { class: ['space-y-0.5', !row.enabled && 'opacity-60'] }, [
         h('div', { class: 'flex items-center space-x-2' }, [
           h('span', { class: 'font-semibold text-gray-200' }, row.name),
           h(
@@ -186,14 +249,21 @@ const columns = [
     key: 'base_url',
     ellipsis: true,
     render(row: ProviderItem) {
-      return h('span', { class: 'font-mono text-xs text-gray-300' }, row.base_url)
+      return h('span', { class: ['font-mono text-xs text-gray-300', !row.enabled && 'opacity-60'] }, row.base_url)
     },
   },
   {
     title: 'Circuit Breaker',
     key: 'breaker_state',
-    width: 140,
+    width: 130,
     render(row: ProviderItem) {
+      if (!row.enabled) {
+        return h(
+          NTag,
+          { size: 'small', bordered: false, class: 'uppercase text-[11px] font-mono text-gray-400 bg-gray-800' },
+          { default: () => 'PAUSED' }
+        )
+      }
       const type =
         row.breaker_state === 'closed'
           ? 'success'
@@ -210,7 +280,7 @@ const columns = [
   {
     title: 'Timeout',
     key: 'timeout_s',
-    width: 90,
+    width: 85,
     render(row: ProviderItem) {
       return h('span', { class: 'text-xs text-gray-400 font-mono' }, `${row.timeout_s}s`)
     },
@@ -292,18 +362,31 @@ const columns = [
 
     <!-- Add / Edit Modal -->
     <NModal v-model:show="showModal" preset="card" :title="modalTitle" class="max-w-lg glass-panel border-gray-800 rounded-xl">
+      <div class="mb-4 p-3 rounded-lg bg-gray-900/60 border border-gray-800 space-y-2">
+        <span class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Quick Presets:</span>
+        <div class="flex flex-wrap gap-1.5">
+          <NButton size="tiny" secondary @click="applyPreset('openai')">OpenAI (gpt-4o-mini)</NButton>
+          <NButton size="tiny" secondary type="warning" @click="applyPreset('claude')">Claude (Anthropic Native)</NButton>
+          <NButton size="tiny" secondary type="info" @click="applyPreset('openrouter')">OpenRouter (Claude/Sonnet)</NButton>
+          <NButton size="tiny" secondary type="success" @click="applyPreset('gemini')">Gemini</NButton>
+        </div>
+      </div>
+
       <NForm label-placement="top" class="space-y-4">
         <div class="grid grid-cols-2 gap-4">
           <NFormItem label="Provider Identifier" required>
-            <NInput v-model:value="formData.name" placeholder="e.g. openai-primary" />
+            <NInput v-model:value="formData.name" placeholder="e.g. openai-primary, claude" />
           </NFormItem>
           <NFormItem label="Failover Priority (1 = Primary)" required>
             <NInputNumber v-model:value="formData.priority" :min="1" :max="100" class="w-full" />
           </NFormItem>
         </div>
 
-        <NFormItem label="Base URL (OpenAI-compatible)" required>
-          <NInput v-model:value="formData.base_url" placeholder="https://api.openai.com/v1" />
+        <NFormItem label="Base URL (OpenAI / Anthropic Compatible)" required>
+          <div class="w-full space-y-1">
+            <NInput v-model:value="formData.base_url" placeholder="https://api.openai.com/v1 or https://api.anthropic.com/v1" />
+            <span class="text-[11px] text-gray-400">Supports OpenAI endpoints (<code>/chat/completions</code>) and Anthropic Claude native (<code>/messages</code>).</span>
+          </div>
         </NFormItem>
 
         <div class="grid grid-cols-2 gap-4">

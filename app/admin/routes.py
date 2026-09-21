@@ -381,17 +381,36 @@ async def delete_provider(provider_id: str, request: Request):
 async def test_provider(req: TestProviderRequest):
     """Test AI provider connection and return latency and completion sample."""
     t0 = time.monotonic()
-    url = req.base_url.rstrip("/") + "/chat/completions"
-    headers = {"Authorization": f"Bearer {req.api_key}", "Content-Type": "application/json"}
-    payload = {
-        "model": req.model,
-        "messages": [
-            {"role": "system", "content": "You are a translator. Translate the word to Myanmar."},
-            {"role": "user", "content": "Hello"}
-        ],
-        "max_tokens": 50,
-        "temperature": 0.1,
-    }
+    base = req.base_url.rstrip("/")
+    is_anthropic = "anthropic.com" in base or base.endswith("/messages")
+
+    if is_anthropic:
+        url = base if base.endswith("/messages") else f"{base}/messages"
+        headers = {
+            "x-api-key": req.api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        }
+        payload = {
+            "model": req.model,
+            "max_tokens": 50,
+            "system": "You are a translator. Translate the word to Myanmar.",
+            "messages": [{"role": "user", "content": "Hello"}],
+            "temperature": 0.1,
+        }
+    else:
+        url = base + "/chat/completions"
+        headers = {"Authorization": f"Bearer {req.api_key}", "Content-Type": "application/json"}
+        payload = {
+            "model": req.model,
+            "messages": [
+                {"role": "system", "content": "You are a translator. Translate the word to Myanmar."},
+                {"role": "user", "content": "Hello"}
+            ],
+            "max_tokens": 50,
+            "temperature": 0.1,
+        }
+
     async with httpx.AsyncClient() as client:
         try:
             resp = await client.post(url, json=payload, headers=headers, timeout=req.timeout_s)
@@ -399,7 +418,10 @@ async def test_provider(req: TestProviderRequest):
             
             if resp.status_code == 200:
                 data = resp.json()
-                content = data["choices"][0]["message"]["content"].strip()
+                if is_anthropic:
+                    content = data["content"][0]["text"].strip()
+                else:
+                    content = data["choices"][0]["message"]["content"].strip()
                 return {
                     "ok": True,
                     "status_code": 200,

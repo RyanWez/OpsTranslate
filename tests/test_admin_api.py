@@ -169,3 +169,38 @@ def test_admin_audit_logs_fallback(client, auth_headers):
     assert "latency_ms" in first_log
 
 
+def test_admin_provider_toggle_and_anthropic_test(client, auth_headers):
+    # 1. Create a provider with enabled=False (Paused)
+    payload = {
+        "name": "claude-test-provider",
+        "base_url": "https://api.anthropic.com/v1",
+        "model": "claude-3-5-sonnet-20241022",
+        "priority": 10,
+        "timeout_s": 20.0,
+        "enabled": False,
+        "api_key": "sk-ant-test-mock-key",
+    }
+    res = client.post("/api/admin/providers", json=payload, headers=auth_headers)
+    assert res.status_code == 200
+
+    # 2. Check provider exists with breaker_state="paused"
+    res = client.get("/api/admin/providers", headers=auth_headers)
+    assert res.status_code == 200
+    p = next(x for x in res.json()["providers"] if x["name"] == "claude-test-provider")
+    assert p["enabled"] is False
+    assert p["breaker_state"] == "paused"
+
+    # 3. Toggle enabled to True
+    payload["enabled"] = True
+    res = client.put("/api/admin/providers/claude-test-provider", json=payload, headers=auth_headers)
+    assert res.status_code == 200
+
+    res = client.get("/api/admin/providers", headers=auth_headers)
+    p = next(x for x in res.json()["providers"] if x["name"] == "claude-test-provider")
+    assert p["enabled"] is True
+
+    # 4. Clean up
+    client.delete("/api/admin/providers/claude-test-provider", headers=auth_headers)
+
+
+

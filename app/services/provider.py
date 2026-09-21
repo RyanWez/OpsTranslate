@@ -92,9 +92,7 @@ class AllProvidersDown(ProviderError):
 
 class ProviderRouter:
     def __init__(self, providers: list[Provider], max_concurrency: int = 8, alerts=None):
-        self.providers = sorted(
-            [p for p in providers if p.enabled], key=lambda p: p.priority
-        )
+        self.providers = sorted(providers, key=lambda p: p.priority)
         self.breakers: dict[str, _Breaker] = {p.name: _Breaker() for p in self.providers}
         self.semaphore = asyncio.Semaphore(max_concurrency)
         self._client: httpx.AsyncClient | None = None
@@ -114,13 +112,18 @@ class ProviderRouter:
             self._client = None
 
     def states(self) -> dict[str, str]:
-        return {name: b.state for name, b in self.breakers.items()}
+        res = {}
+        for p in self.providers:
+            if not p.enabled:
+                res[p.name] = "paused"
+            else:
+                b = self.breakers.get(p.name)
+                res[p.name] = b.state if b else "closed"
+        return res
 
     def reload_providers(self, providers: list[Provider]) -> None:
         """Dynamically replace provider pool and update breaker states."""
-        self.providers = sorted(
-            [p for p in providers if p.enabled], key=lambda p: p.priority
-        )
+        self.providers = sorted(providers, key=lambda p: p.priority)
         new_breakers = {}
         for p in self.providers:
             new_breakers[p.name] = self.breakers.get(p.name, _Breaker())
@@ -128,7 +131,11 @@ class ProviderRouter:
 
     def any_closed(self) -> bool:
         now = time.monotonic()
-        return any(b.can_try(now) for b in self.breakers.values())
+        return any(
+            b.can_try(now)
+            for p in self.providers
+            if p.enabled and (b := self.breakers.get(p.name))
+        )
 
     async def translate(
         self,
@@ -143,11 +150,11 @@ class ProviderRouter:
         bounce between providers).
         """
         now = time.monotonic()
-        candidates = self.providers
+        candidates = [p for p in self.providers if p.enabled]
         if force is not None:
-            candidates = [p for p in self.providers if p.name == force]
+            candidates = [p for p in self.providers if p.name == force and p.enabled]
             if not candidates:
-                raise ProviderError(f"unknown provider: {force}")
+                raise ProviderError(f"unknown or paused provider: {force}")
 
         errors: list[str] = []
         for provider in candidates:
@@ -197,11 +204,60 @@ class ProviderRouter:
                         log.warning("circuit_resolve_failed", exc_info=True)
                 return text, provider.name
 
-        raise AllProvidersDown("; ".join(errors) or "no providers configured")
+        raise AllProvidersDown("; ".join(errors) or "no active providers configured")
 
     async def _call(self, provider: Provider, masked_text: str, system_prompt: str) -> str:
         client = await self._client_get()
-        url = provider.base_url.rstrip("/") + "/chat/completions"
+        base = provider.base_url.rstrip("/")
+        is_anthropic = "anthropic.com" in base or base.endswith("/messages")
+
+        if is_anthropic:
+            url = base if base.endswith("/messages") else f"{base}/messages"
+            headers = {
+                "x-api-key": provider.api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            }
+            payload = {
+                "model": provider.model,
+                "max_tokens": config.PROVIDER_MAX_OUTPUT_TOKENS,
+                "system": system_prompt,
+                "messages": [
+                    {"role": "user", "content": f"<src>{masked_text}</src>"},
+                ],
+                "temperature": 0.1,
+            }
+            resp = await client.post(url, json=payload, headers=headers, timeout=provider.timeout_s)
+            try:
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                err_msg = ""
+                try:
+                    err_body = resp.json()
+                    if isinstance(err_body, dict):
+                        err_inner = err_body.get("error")
+                        if isinstance(err_inner, dict) and "message" in err_inner:
+                            err_msg = f": {err_inner['message']}"
+                        elif isinstance(err_inner, str):
+                            err_msg = f": {err_inner}"
+                except Exception:
+                    err_msg = f": {resp.text[:120]}"
+                raise ProviderError(f"HTTP {resp.status_code}{err_msg}") from exc
+            data = resp.json()
+            try:
+                content = data["content"][0]["text"].strip()
+                if data.get("stop_reason") == "max_tokens":
+                    raise ProviderError(
+                        f"provider output reached max token limit ({config.PROVIDER_MAX_OUTPUT_TOKENS})"
+                    )
+                return content
+            except ProviderError:
+                raise
+            except (KeyError, IndexError, TypeError, AttributeError) as exc:
+                raise ProviderError(f"bad response shape: {exc}") from exc
+
+        # Standard OpenAI-compatible format (OpenAI, OpenRouter, DeepSeek, Groq, Gemini, vLLM, etc.)
+        url = base + "/chat/completions"
         payload = {
             "model": provider.model,
             "messages": [
