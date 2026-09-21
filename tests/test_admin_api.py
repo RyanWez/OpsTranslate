@@ -74,6 +74,9 @@ def test_admin_providers_endpoints(client, auth_headers):
     assert "providers" in data
     assert len(data["providers"]) >= 1
 
+    # Clean up leftover if any
+    client.delete("/api/admin/providers/test-provider-unit", headers=auth_headers)
+
     # Create new provider
     payload = {
         "name": "test-provider-unit",
@@ -92,6 +95,9 @@ def test_admin_providers_endpoints(client, auth_headers):
     res = client.get("/api/admin/providers", headers=auth_headers)
     names = [p["name"] for p in res.json()["providers"]]
     assert "test-provider-unit" in names
+
+    # Clean up
+    client.delete("/api/admin/providers/test-provider-unit", headers=auth_headers)
 
 
 def test_admin_playground_endpoint(client, auth_headers):
