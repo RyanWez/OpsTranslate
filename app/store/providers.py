@@ -20,30 +20,34 @@ async def get_active_service_providers() -> list[ServiceProvider]:
     """
     if dbmod.is_configured():
         try:
+            import asyncio
             from sqlalchemy import select
 
-            async with dbmod.session() as sess:
-                result = await sess.execute(
-                    select(DBProvider)
-                    .where(DBProvider.enabled == True)  # noqa: E712
-                    .order_by(DBProvider.priority.asc(), DBProvider.id.asc())
-                )
-                db_rows = result.scalars().all()
-                if db_rows:
-                    providers = []
-                    for row in db_rows:
-                        providers.append(
-                            ServiceProvider(
-                                name=row.name,
-                                base_url=row.base_url.rstrip("/"),
-                                api_key=row.api_key,
-                                model=row.model,
-                                priority=row.priority,
-                                enabled=row.enabled,
-                                timeout_s=float(row.timeout_ms / 1000.0) if row.timeout_ms else config.PROVIDER_TIMEOUT_S,
-                            )
+            async def _fetch():
+                async with dbmod.session() as sess:
+                    result = await sess.execute(
+                        select(DBProvider)
+                        .where(DBProvider.enabled == True)  # noqa: E712
+                        .order_by(DBProvider.priority.asc(), DBProvider.id.asc())
+                    )
+                    return result.scalars().all()
+
+            db_rows = await asyncio.wait_for(_fetch(), timeout=2.0)
+            if db_rows:
+                providers = []
+                for row in db_rows:
+                    providers.append(
+                        ServiceProvider(
+                            name=row.name,
+                            base_url=row.base_url.rstrip("/"),
+                            api_key=row.api_key,
+                            model=row.model,
+                            priority=row.priority,
+                            enabled=row.enabled,
+                            timeout_s=float(row.timeout_ms / 1000.0) if row.timeout_ms else config.PROVIDER_TIMEOUT_S,
                         )
-                    return providers
+                    )
+                return providers
         except Exception as exc:
             log.warning("failed to load providers from db, falling back to env: %s", exc)
 

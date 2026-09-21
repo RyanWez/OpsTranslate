@@ -45,6 +45,7 @@ def get_engine():
         new_query = urllib.parse.urlencode({k: v[0] for k, v in query_params.items()})
         cleaned_url = urllib.parse.urlunparse(parsed._replace(query=new_query))
 
+        connect_args["timeout"] = 2.0
         _engine = create_async_engine(
             cleaned_url,
             connect_args=connect_args,
