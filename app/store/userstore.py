@@ -85,13 +85,15 @@ class UserStore:
                     ).scalar_one_or_none()
                 if row is not None and row.active:
                     result: tuple[bool, str] = (True, row.role or "staff")
-                else:
+                    self._memo_set(self._allowed_memo, user_id, result)
+                    return result
+                elif row is not None and not row.active:
                     result = (False, "staff")
-                self._memo_set(self._allowed_memo, user_id, result)
-                return result
-            except Exception as exc:  # noqa: BLE001 - fail closed on DB errors
+                    self._memo_set(self._allowed_memo, user_id, result)
+                    return result
+            except Exception as exc:  # noqa: BLE001 - fall through to env seed
                 log.warning("allowlist_lookup_failed: %s", exc)
-                return False, "staff"
+
         # fallback to env seed
         if user_id in self._seed_admin:
             result = (True, "admin")
