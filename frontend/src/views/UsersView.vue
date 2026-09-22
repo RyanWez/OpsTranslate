@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, h } from 'vue'
+import { ref, computed, onMounted, onUnmounted, h } from 'vue'
 import { useUsersStore } from '../stores/users'
 import {
   NCard,
@@ -16,7 +16,13 @@ import {
   useMessage,
   useDialog,
 } from 'naive-ui'
-import { AddOutline, RefreshOutline, PersonCircleOutline } from '@vicons/ionicons5'
+import {
+  AddOutline,
+  RefreshOutline,
+  SearchOutline,
+  CopyOutline,
+  OpenOutline,
+} from '@vicons/ionicons5'
 import type { StaffUser, UserPayload } from '../types'
 
 const usersStore = useUsersStore()
@@ -31,16 +37,58 @@ onUnmounted(() => {
   usersStore.stopLiveSync()
 })
 
+const searchQuery = ref('')
 const showModal = ref(false)
 const modalTitle = ref('Add Staff Member')
 const isEditing = ref(false)
 const formData = ref<UserPayload>({
   user_id: 0,
   display_name: '',
+  username: '',
   role: 'staff',
   daily_soft_cap: 200,
   active: true,
 })
+
+function formatRelativeTime(dateStr?: string | null): string {
+  if (!dateStr) return 'Never'
+  const date = new Date(dateStr)
+  if (isNaN(date.getTime())) return 'Never'
+  const now = new Date()
+  const diffSec = Math.floor((now.getTime() - date.getTime()) / 1000)
+  if (diffSec < 60) return 'Just now'
+  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`
+  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`
+  if (diffSec < 86400 * 7) return `${Math.floor(diffSec / 86400)}d ago`
+  return date.toLocaleDateString()
+}
+
+function copyToClipboard(text: string) {
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => {
+      message.success(`Copied ID: ${text}`)
+    }).catch(() => {
+      message.info(`ID: ${text}`)
+    })
+  } else {
+    message.info(`ID: ${text}`)
+  }
+}
+
+const filteredUsers = computed(() => {
+  const q = searchQuery.value.trim().toLowerCase()
+  if (!q) return usersStore.users
+  return usersStore.users.filter((u) => {
+    const nameMatch = u.display_name?.toLowerCase().includes(q)
+    const userMatch = u.username?.toLowerCase().includes(q)
+    const idMatch = String(u.user_id).includes(q)
+    const roleMatch = u.role?.toLowerCase().includes(q)
+    return nameMatch || userMatch || idMatch || roleMatch
+  })
+})
+
+const activeCount = computed(() => usersStore.users.filter((u) => u.active).length)
+const totalCount = computed(() => usersStore.users.length)
 
 function openAddModal() {
   isEditing.value = false
@@ -48,6 +96,7 @@ function openAddModal() {
   formData.value = {
     user_id: 0,
     display_name: '',
+    username: '',
     role: 'staff',
     daily_soft_cap: 200,
     active: true,
@@ -57,10 +106,11 @@ function openAddModal() {
 
 function openEditModal(row: StaffUser) {
   isEditing.value = true
-  modalTitle.value = `Edit User: ${row.display_name || row.user_id}`
+  modalTitle.value = `Edit User: ${row.display_name || row.username || row.user_id}`
   formData.value = {
     user_id: row.user_id,
     display_name: row.display_name || '',
+    username: row.username ? row.username.replace(/^@/, '') : '',
     role: row.role,
     daily_soft_cap: row.daily_soft_cap,
     active: row.active,
@@ -74,8 +124,14 @@ async function handleSaveUser() {
     return
   }
 
+  // Sanitize username by stripping leading @
+  const payload: UserPayload = {
+    ...formData.value,
+    username: formData.value.username ? formData.value.username.trim().replace(/^@/, '') : null,
+  }
+
   try {
-    const success = await usersStore.saveUser(formData.value)
+    const success = await usersStore.saveUser(payload)
     if (success) {
       message.success('User updated successfully')
       showModal.value = false
@@ -88,7 +144,7 @@ async function handleSaveUser() {
 function handleDeleteUser(row: StaffUser) {
   dialog.warning({
     title: 'Confirm Removal',
-    content: `Are you sure you want to revoke access for User ID ${row.user_id} (${row.display_name || 'Staff'})?`,
+    content: `Are you sure you want to revoke access for User ID ${row.user_id} (${row.display_name || row.username || 'Staff'})?`,
     positiveText: 'Remove',
     negativeText: 'Cancel',
     onPositiveClick: async () => {
@@ -109,73 +165,145 @@ const roleOptions = [
 
 const columns = [
   {
-    title: 'Telegram User ID',
-    key: 'user_id',
+    title: 'Staff Member & Identity',
+    key: 'identity',
+    minWidth: 260,
     render(row: StaffUser) {
-      return h('div', { class: 'flex items-center space-x-2' }, [
-        h(PersonCircleOutline, { class: 'w-4 h-4 text-gray-400' }),
-        h('span', { class: 'font-mono text-xs font-semibold text-gray-200' }, row.user_id),
+      const cleanUsername = row.username ? row.username.replace(/^@/, '') : null
+      const initials = (row.display_name || (cleanUsername ? `@${cleanUsername}` : String(row.user_id)))
+        .slice(0, 2)
+        .toUpperCase()
+
+      return h('div', { class: 'flex items-center space-x-3 py-1' }, [
+        // Avatar circle
+        h(
+          'div',
+          {
+            class:
+              'w-9 h-9 rounded-full bg-gradient-to-tr from-cyan-950 to-blue-900 border border-cyan-800/60 flex items-center justify-center text-cyan-300 font-semibold text-xs tracking-wider shrink-0 shadow-inner',
+          },
+          initials
+        ),
+        // Identity details
+        h('div', { class: 'flex flex-col min-w-0' }, [
+          // Display Name
+          h(
+            'div',
+            { class: 'font-semibold text-sm text-gray-100 truncate' },
+            row.display_name || 'Unnamed Member'
+          ),
+          // Username and ID row
+          h('div', { class: 'flex items-center gap-2 text-xs flex-wrap mt-0.5' }, [
+            cleanUsername
+              ? h(
+                  'a',
+                  {
+                    href: `https://t.me/${cleanUsername}`,
+                    target: '_blank',
+                    rel: 'noopener noreferrer',
+                    class:
+                      'inline-flex items-center text-cyan-400 hover:text-cyan-300 hover:underline font-mono text-[11px] transition-colors',
+                  },
+                  [
+                    h('span', `@${cleanUsername}`),
+                    h(OpenOutline, { class: 'w-3 h-3 ml-0.5 opacity-75' }),
+                  ]
+                )
+              : null,
+            h(
+              'button',
+              {
+                type: 'button',
+                onClick: () => copyToClipboard(String(row.user_id)),
+                title: 'Click to copy Telegram User ID',
+                class:
+                  'inline-flex items-center text-gray-400 hover:text-gray-200 font-mono text-[11px] bg-gray-800/80 hover:bg-gray-700/80 px-1.5 py-0.5 rounded border border-gray-700/60 transition-colors',
+              },
+              [
+                h('span', `ID: ${row.user_id}`),
+                h(CopyOutline, { class: 'w-3 h-3 ml-1 opacity-70' }),
+              ]
+            ),
+          ]),
+        ]),
       ])
-    },
-  },
-  {
-    title: 'Display Name',
-    key: 'display_name',
-    render(row: StaffUser) {
-      return h(
-        'span',
-        { class: 'text-sm text-gray-300' },
-        row.display_name || '—'
-      )
     },
   },
   {
     title: 'Role',
     key: 'role',
-    width: 110,
+    width: 100,
     render(row: StaffUser) {
       const isAdmin = row.role === 'admin'
       return h(
         NTag,
         {
           size: 'small',
-          type: isAdmin ? 'info' : 'success',
-          class: 'uppercase font-mono text-[10px]',
+          type: isAdmin ? 'info' : 'default',
+          class: 'uppercase font-mono text-[10px] tracking-wide font-semibold',
         },
         { default: () => row.role }
       )
     },
   },
   {
-    title: 'Daily Soft Cap',
+    title: 'Daily Cap',
     key: 'daily_soft_cap',
-    width: 140,
+    width: 130,
     render(row: StaffUser) {
       return h('span', { class: 'font-mono text-xs text-gray-300' }, `${row.daily_soft_cap} msgs/day`)
     },
   },
   {
-    title: 'Status',
-    key: 'active',
-    width: 110,
+    title: 'Last Active',
+    key: 'last_active_at',
+    width: 130,
     render(row: StaffUser) {
+      const relTime = formatRelativeTime(row.last_active_at)
+      const isRecent = relTime.includes('now') || relTime.includes('m ago') || relTime.includes('h ago')
       return h(
-        NTag,
+        'span',
         {
-          size: 'small',
-          type: row.active ? 'success' : 'default',
-          class: 'text-[11px]',
+          class: `text-xs font-mono ${isRecent ? 'text-cyan-400 font-medium' : 'text-gray-400'}`,
         },
-        { default: () => (row.active ? 'Active' : 'Suspended') }
+        relTime
       )
+    },
+  },
+  {
+    title: 'Access Control',
+    key: 'active',
+    width: 130,
+    render(row: StaffUser) {
+      return h('div', { class: 'flex items-center space-x-2' }, [
+        h(NSwitch, {
+          size: 'small',
+          value: row.active,
+          onUpdateValue: async (val: boolean) => {
+            const ok = await usersStore.toggleUserStatus(row.user_id, val)
+            if (ok) {
+              message.success(val ? `User ${row.user_id} activated` : `User ${row.user_id} suspended`)
+            } else {
+              message.error('Failed to update status')
+            }
+          },
+        }),
+        h(
+          'span',
+          {
+            class: `text-[11px] font-medium ${row.active ? 'text-emerald-400' : 'text-gray-500'}`,
+          },
+          row.active ? 'Active' : 'Suspended'
+        ),
+      ])
     },
   },
   {
     title: 'Actions',
     key: 'actions',
-    width: 150,
+    width: 130,
     render(row: StaffUser) {
-      return h('div', { class: 'flex items-center space-x-2' }, [
+      return h('div', { class: 'flex items-center space-x-1.5' }, [
         h(
           NButton,
           {
@@ -206,8 +334,15 @@ const columns = [
     <!-- Header -->
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
       <div>
-        <h1 class="text-2xl font-bold text-gray-100 tracking-tight">Staff & Access Control</h1>
-        <p class="text-xs text-gray-400 mt-0.5">Allowlist Telegram user IDs, manage roles, and enforce daily soft quota caps.</p>
+        <div class="flex items-center gap-3">
+          <h1 class="text-2xl font-bold text-gray-100 tracking-tight">Staff & Access Control</h1>
+          <NTag size="small" :bordered="false" type="info" class="font-mono text-xs">
+            {{ activeCount }} Active / {{ totalCount }} Total
+          </NTag>
+        </div>
+        <p class="text-xs text-gray-400 mt-0.5">
+          Allowlist Telegram user IDs, manage full names, usernames, roles, and auto-discovered members.
+        </p>
       </div>
       <div class="flex items-center space-x-2 sm:space-x-3">
         <NButton secondary size="small" @click="() => usersStore.fetchUsers()" :loading="usersStore.loading">
@@ -225,19 +360,40 @@ const columns = [
       </div>
     </div>
 
+    <!-- Filter & Search Toolbar -->
+    <div class="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+      <div class="w-full sm:max-w-md">
+        <NInput
+          v-model:value="searchQuery"
+          clearable
+          placeholder="Filter by Name, @username, or User ID..."
+          size="small"
+        >
+          <template #prefix>
+            <SearchOutline class="w-4 h-4 text-gray-400 mr-1" />
+          </template>
+        </NInput>
+      </div>
+    </div>
+
     <!-- Table -->
-    <NCard class="glass-panel border-gray-800 rounded-xl" :bordered="false">
+    <NCard class="glass-panel border-gray-800 rounded-xl overflow-hidden" :bordered="false">
       <NDataTable
         :columns="columns"
-        :data="usersStore.users"
+        :data="filteredUsers"
         :loading="usersStore.loading"
         :row-key="(row) => row.user_id"
-        :scroll-x="700"
+        :scroll-x="850"
       />
     </NCard>
 
     <!-- Add/Edit Modal -->
-    <NModal v-model:show="showModal" preset="card" :title="modalTitle" class="w-[94vw] max-w-md glass-panel border-gray-800 rounded-xl">
+    <NModal
+      v-model:show="showModal"
+      preset="card"
+      :title="modalTitle"
+      class="w-[94vw] max-w-md glass-panel border-gray-800 rounded-xl"
+    >
       <NForm label-placement="top" class="space-y-4">
         <NFormItem label="Telegram User ID" required>
           <NInputNumber
@@ -245,12 +401,20 @@ const columns = [
             :disabled="isEditing"
             :show-button="false"
             placeholder="e.g. 123456789"
-            class="w-full"
+            class="w-full font-mono"
           />
         </NFormItem>
 
-        <NFormItem label="Display Name / Note">
-          <NInput v-model:value="formData.display_name" placeholder="e.g. John Doe (Support Lead)" />
+        <NFormItem label="Full Display Name">
+          <NInput v-model:value="formData.display_name" placeholder="e.g. John Doe" />
+        </NFormItem>
+
+        <NFormItem label="Telegram @Username (without @)">
+          <NInput v-model:value="formData.username" placeholder="e.g. johndoe">
+            <template #prefix>
+              <span class="text-gray-500 text-xs">@</span>
+            </template>
+          </NInput>
         </NFormItem>
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
@@ -262,8 +426,11 @@ const columns = [
           </NFormItem>
         </div>
 
-        <div class="flex items-center justify-between pt-2">
-          <span class="text-xs text-gray-300">Grant Translation Access (Active)</span>
+        <div class="flex items-center justify-between pt-2 border-t border-gray-800/60">
+          <div>
+            <div class="text-xs font-semibold text-gray-200">Grant Translation Access</div>
+            <div class="text-[11px] text-gray-400">Allows bot usage and group message translation</div>
+          </div>
           <NSwitch v-model:value="formData.active" />
         </div>
 

@@ -41,12 +41,16 @@ class AllowedUser(Base):
 
     user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     display_name: Mapped[str | None] = mapped_column(Text)
+    username: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
     role: Mapped[str] = mapped_column(String(16), default="staff")  # admin | staff
     daily_soft_cap: Mapped[int] = mapped_column(Integer, default=200)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     added_by: Mapped[int | None] = mapped_column(BigInteger)
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow
+    )
+    last_active_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
 

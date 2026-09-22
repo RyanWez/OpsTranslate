@@ -1,6 +1,7 @@
 """Admin API router for OpsTranslate Bot."""
 from __future__ import annotations
 
+import datetime
 import time
 from typing import Any, Optional
 
@@ -93,9 +94,14 @@ class TestProviderRequest(BaseModel):
 class UserPayload(BaseModel):
     user_id: int
     display_name: Optional[str] = None
+    username: Optional[str] = None
     role: str = "staff"  # staff | admin
     daily_soft_cap: int = 200
     active: bool = True
+
+
+class UserStatusPayload(BaseModel):
+    active: bool
 
 
 class PlaygroundRequest(BaseModel):
@@ -683,6 +689,7 @@ async def test_provider(req: TestProviderRequest):
 async def list_users(request: Request):
     services: Services = request.app.state.services
     users = []
+    seen_ids: set[int] = set()
 
     if dbmod.is_configured():
         try:
@@ -692,24 +699,65 @@ async def list_users(request: Request):
                 result = await sess.execute(select(AllowedUser).order_by(AllowedUser.created_at.desc()))
                 rows = result.scalars().all()
                 for r in rows:
+                    seen_ids.add(r.user_id)
                     users.append({
                         "user_id": r.user_id,
                         "display_name": r.display_name,
+                        "username": r.username,
                         "role": r.role,
                         "daily_soft_cap": r.daily_soft_cap,
                         "active": r.active,
+                        "last_active_at": r.last_active_at.isoformat() if r.last_active_at else None,
                         "created_at": r.created_at.strftime("%Y-%m-%d %H:%M") if r.created_at else None,
                     })
-                return {"users": users}
         except Exception:
             pass
 
-    # Fallback to seeded env users
+    # Merge discovered users from memory if any
+    if hasattr(services.user_store, "get_discovered_users"):
+        discovered = services.user_store.get_discovered_users()
+        for d in discovered:
+            uid = d.get("user_id")
+            if uid and uid not in seen_ids:
+                seen_ids.add(uid)
+                users.append({
+                    "user_id": uid,
+                    "display_name": d.get("display_name"),
+                    "username": d.get("username"),
+                    "role": d.get("role", "staff"),
+                    "daily_soft_cap": d.get("daily_soft_cap", 200),
+                    "active": d.get("active", True),
+                    "last_active_at": d.get("last_active_at"),
+                    "created_at": d.get("created_at"),
+                })
+
+    # Fallback to seeded env users if not already in list
     for uid in config.ADMIN_USER_IDS:
-        users.append({"user_id": uid, "display_name": "Admin (Env)", "role": "admin", "daily_soft_cap": 500, "active": True})
+        if uid not in seen_ids:
+            seen_ids.add(uid)
+            users.append({
+                "user_id": uid,
+                "display_name": "Admin (Env)",
+                "username": None,
+                "role": "admin",
+                "daily_soft_cap": 500,
+                "active": True,
+                "last_active_at": None,
+                "created_at": None,
+            })
     for uid in config.ALLOWED_USER_IDS:
-        if uid not in config.ADMIN_USER_IDS:
-            users.append({"user_id": uid, "display_name": "Staff (Env)", "role": "staff", "daily_soft_cap": 200, "active": True})
+        if uid not in seen_ids:
+            seen_ids.add(uid)
+            users.append({
+                "user_id": uid,
+                "display_name": "Staff (Env)",
+                "username": None,
+                "role": "staff",
+                "daily_soft_cap": 200,
+                "active": True,
+                "last_active_at": None,
+                "created_at": None,
+            })
     return {"users": users}
 
 
@@ -718,6 +766,20 @@ async def add_or_update_user(payload: UserPayload, request: Request):
     services: Services = request.app.state.services
 
     if not dbmod.is_configured():
+        if hasattr(services.user_store, "_discovered_users"):
+            services.user_store._discovered_users[payload.user_id] = {
+                "user_id": payload.user_id,
+                "display_name": payload.display_name,
+                "username": payload.username,
+                "role": payload.role,
+                "daily_soft_cap": payload.daily_soft_cap,
+                "active": payload.active,
+                "last_active_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                "created_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M"),
+            }
+            services.user_store.invalidate(payload.user_id)
+            broadcaster.broadcast("users_changed", {"action": "save", "user_id": payload.user_id})
+            return {"ok": True, "message": "User saved."}
         raise HTTPException(status_code=400, detail="Database is not configured to persist dynamic users.")
 
     from sqlalchemy import select
@@ -726,6 +788,8 @@ async def add_or_update_user(payload: UserPayload, request: Request):
         existing = (await sess.execute(select(AllowedUser).where(AllowedUser.user_id == payload.user_id))).scalar_one_or_none()
         if existing:
             existing.display_name = payload.display_name or existing.display_name
+            if payload.username is not None:
+                existing.username = payload.username
             existing.role = payload.role
             existing.daily_soft_cap = payload.daily_soft_cap
             existing.active = payload.active
@@ -733,6 +797,7 @@ async def add_or_update_user(payload: UserPayload, request: Request):
             u = AllowedUser(
                 user_id=payload.user_id,
                 display_name=payload.display_name,
+                username=payload.username,
                 role=payload.role,
                 daily_soft_cap=payload.daily_soft_cap,
                 active=payload.active,
@@ -744,6 +809,27 @@ async def add_or_update_user(payload: UserPayload, request: Request):
     services.user_store.invalidate(payload.user_id)
     broadcaster.broadcast("users_changed", {"action": "save", "user_id": payload.user_id})
     return {"ok": True, "message": "User saved."}
+
+
+@router.patch("/users/{user_id}/status", dependencies=[Depends(require_admin)])
+async def toggle_user_status(user_id: int, payload: UserStatusPayload, request: Request):
+    services: Services = request.app.state.services
+
+    if dbmod.is_configured():
+        from sqlalchemy import select
+
+        async with dbmod.session() as sess:
+            u = (await sess.execute(select(AllowedUser).where(AllowedUser.user_id == user_id))).scalar_one_or_none()
+            if u:
+                u.active = payload.active
+                await sess.commit()
+
+    if hasattr(services.user_store, "_discovered_users") and user_id in services.user_store._discovered_users:
+        services.user_store._discovered_users[user_id]["active"] = payload.active
+
+    services.user_store.invalidate(user_id)
+    broadcaster.broadcast("users_changed", {"action": "status_toggle", "user_id": user_id, "active": payload.active})
+    return {"ok": True, "user_id": user_id, "active": payload.active}
 
 
 @router.delete("/users/{user_id}", dependencies=[Depends(require_admin)])
@@ -758,6 +844,9 @@ async def delete_user(user_id: int, request: Request):
             if u:
                 await sess.delete(u)
                 await sess.commit()
+
+    if hasattr(services.user_store, "_discovered_users"):
+        services.user_store._discovered_users.pop(user_id, None)
 
     services.user_store.invalidate(user_id)
     broadcaster.broadcast("users_changed", {"action": "delete", "user_id": user_id})

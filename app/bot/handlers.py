@@ -86,6 +86,17 @@ async def _gate_access(
     )
     if not allowed:
         log.info("access_denied user=%s reason=%s", message.from_user.id, reason)
+    else:
+        try:
+            if message.from_user:
+                await services.user_store.sync_user_profile(
+                    message.from_user.id,
+                    full_name=message.from_user.full_name,
+                    username=message.from_user.username,
+                    auto_allow=True,
+                )
+        except Exception:  # noqa: BLE001
+            log.warning("user_profile_sync_failed", exc_info=True)
     return allowed
 
 
@@ -132,6 +143,13 @@ async def cmd_whoami(message: Message, services: Services) -> None:
             services.bot, services.cache, message.from_user.id,
             user_store=services.user_store,
         )
+        if message.from_user:
+            await services.user_store.sync_user_profile(
+                message.from_user.id,
+                full_name=message.from_user.full_name,
+                username=message.from_user.username,
+                auto_allow=allowed,
+            )
         if not allowed:
             await services.alerts.send(
                 "P3",

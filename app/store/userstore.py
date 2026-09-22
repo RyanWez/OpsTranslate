@@ -13,6 +13,7 @@ can be made visible immediately via invalidate() or after the TTL.
 
 from __future__ import annotations
 
+import datetime
 import logging
 import time
 
@@ -29,6 +30,7 @@ class UserStore:
         self._targets: dict[int, str] = {}  # in-memory fallback for user_settings
         self._seed_staff = set(config.ALLOWED_USER_IDS)
         self._seed_admin = set(config.ADMIN_USER_IDS)
+        self._discovered_users: dict[int, dict] = {}  # in-memory discovered profile registry
         # 60 s memo caches: user_id -> (value, timestamp)
         self._allowed_memo: dict[int, tuple[tuple[bool, str], float]] = {}
         self._target_memo: dict[int, tuple[str, float]] = {}
@@ -186,3 +188,104 @@ class UserStore:
         cap = 200
         self._memo_set(self._cap_memo, user_id, cap)
         return cap
+
+    async def sync_user_profile(
+        self,
+        user_id: int,
+        *,
+        full_name: str | None = None,
+        username: str | None = None,
+        auto_allow: bool = True,
+    ) -> None:
+        """Auto-discover or update a user's profile and last_active timestamp.
+
+        Invoked when any user messages the bot.
+        """
+        if username:
+            username = username.lstrip("@").strip()
+
+        now_dt = datetime.datetime.now(datetime.timezone.utc)
+        now_str = now_dt.strftime("%Y-%m-%d %H:%M")
+        is_admin = user_id in self._seed_admin
+        default_role = "admin" if is_admin else "staff"
+        default_cap = 500 if is_admin else 200
+
+        # 1. Update in-memory registry
+        is_new = user_id not in self._discovered_users
+        if is_new:
+            self._discovered_users[user_id] = {
+                "user_id": user_id,
+                "display_name": full_name or f"User {user_id}",
+                "username": username,
+                "role": default_role,
+                "daily_soft_cap": default_cap,
+                "active": True if (auto_allow or is_admin) else False,
+                "created_at": now_str,
+                "last_active_at": now_str,
+            }
+        else:
+            rec = self._discovered_users[user_id]
+            rec["last_active_at"] = now_str
+            if username:
+                rec["username"] = username
+            if full_name:
+                rec["display_name"] = full_name
+
+        # 2. Update/Insert in database if configured
+        if dbmod.is_configured():
+            try:
+                from sqlalchemy import select
+                from .models import AllowedUser
+
+                async with dbmod.session() as sess:
+                    row = (
+                        await sess.execute(
+                            select(AllowedUser).where(AllowedUser.user_id == user_id)
+                        )
+                    ).scalar_one_or_none()
+                    if row is not None:
+                        row.last_active_at = now_dt
+                        if username:
+                            row.username = username
+                        if full_name:
+                            row.display_name = full_name
+                    else:
+                        is_new = True
+                        new_u = AllowedUser(
+                            user_id=user_id,
+                            display_name=full_name or f"User {user_id}",
+                            username=username,
+                            role=default_role,
+                            daily_soft_cap=default_cap,
+                            active=True if (auto_allow or is_admin) else False,
+                            created_at=now_dt,
+                            last_active_at=now_dt,
+                        )
+                        sess.add(new_u)
+                    await sess.commit()
+            except Exception as exc:  # noqa: BLE001
+                log.warning("user_profile_sync_failed: %s", exc)
+
+        # Invalidate memo
+        self.invalidate(user_id)
+
+        # Broadcast SSE if new user discovered
+        if is_new:
+            try:
+                from ..admin.sse import broadcaster
+
+                broadcaster.broadcast(
+                    "users_changed",
+                    {
+                        "action": "auto_discover",
+                        "user_id": user_id,
+                        "display_name": full_name,
+                        "username": username,
+                    },
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
+    def get_discovered_users(self) -> list[dict]:
+        """Return in-memory discovered users (for dev or non-DB runs)."""
+        return list(self._discovered_users.values())

@@ -48,6 +48,8 @@ export const api = {
   // Users
   getUsers: () => apiClient.get<{ users: StaffUser[] }>('/users'),
   saveUser: (payload: UserPayload) => apiClient.post<{ ok: boolean }>('/users', payload),
+  toggleUserStatus: (userId: number, active: boolean) =>
+    apiClient.patch<{ ok: boolean; user_id: number; active: boolean }>(`/users/${userId}/status`, { active }),
   deleteUser: (userId: number) => apiClient.delete<{ ok: boolean }>(`/users/${userId}`),
 
   // Playground

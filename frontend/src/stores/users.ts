@@ -65,6 +65,20 @@ export const useUsersStore = defineStore('users', () => {
     }
   }
 
+  async function toggleUserStatus(userId: number, active: boolean): Promise<boolean> {
+    try {
+      const target = users.value.find((u) => u.user_id === userId)
+      if (target) {
+        target.active = active
+      }
+      await api.toggleUserStatus(userId, active)
+      return true
+    } catch {
+      await fetchUsers(true)
+      return false
+    }
+  }
+
   return {
     users,
     loading,
@@ -72,6 +86,7 @@ export const useUsersStore = defineStore('users', () => {
     startLiveSync,
     stopLiveSync,
     saveUser,
+    toggleUserStatus,
     deleteUser,
   }
 })

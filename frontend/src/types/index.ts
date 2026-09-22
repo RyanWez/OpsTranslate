@@ -71,15 +71,18 @@ export interface TestProviderResult {
 export interface StaffUser {
   user_id: number
   display_name: string | null
+  username?: string | null
   role: 'admin' | 'staff' | string
   daily_soft_cap: number
   active: boolean
-  created_at?: string
+  last_active_at?: string | null
+  created_at?: string | null
 }
 
 export interface UserPayload {
   user_id: number
   display_name?: string | null
+  username?: string | null
   role: string
   daily_soft_cap: number
   active: boolean
