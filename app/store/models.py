@@ -78,13 +78,13 @@ class Provider(Base):
 
     @property
     def api_key(self) -> str:
-        if self.api_key_enc:
-            return self.api_key_enc.decode("utf-8", errors="ignore")
-        return ""
+        from .crypto import decrypt_secret
+        return decrypt_secret(self.api_key_enc)
 
     @api_key.setter
     def api_key(self, val: str) -> None:
-        self.api_key_enc = val.encode("utf-8") if val else None
+        from .crypto import encrypt_secret
+        self.api_key_enc = encrypt_secret(val)
 
 
 class ProviderHealth(Base):

@@ -187,9 +187,15 @@ async def get_overview(request: Request):
 
 # ---- Policy & Term Glossary -----------------------------------------------
 
+class DenyTermPayload(BaseModel):
+    lang: str
+    term: str
+
+
 @router.get("/policy", dependencies=[Depends(require_admin)])
-async def get_policy():
-    from ..policy.policy_data import CONCEPTS, DENY_TERMS
+async def get_policy(request: Request):
+    services: Services = request.app.state.services
+    from ..policy.policy_data import CONCEPTS
     concepts_out = []
     for c in CONCEPTS:
         concepts_out.append({
@@ -202,9 +208,9 @@ async def get_policy():
             "outputs": c.outputs,
         })
     return {
-        "version": config.POLICY_VERSION,
+        "version": services.policy.version,
         "concepts": concepts_out,
-        "deny_terms": DENY_TERMS,
+        "deny_terms": services.policy.deny,
     }
 
 
@@ -224,6 +230,90 @@ async def test_policy_regression(request: Request):
         "failed": len(failed_cases),
         "results": results,
     }
+
+
+@router.post("/policy/deny-terms", dependencies=[Depends(require_admin)])
+async def add_deny_term(payload: DenyTermPayload, request: Request):
+    """Add a custom forbidden output term, guarded by regression test verification."""
+    lang = payload.lang.lower().strip()
+    term = payload.term.strip()
+    if lang not in ("en", "my", "zh"):
+        raise HTTPException(status_code=400, detail="Invalid language. Supported: en, my, zh")
+    if not term:
+        raise HTTPException(status_code=400, detail="Term cannot be empty")
+
+    services: Services = request.app.state.services
+    current_deny = services.policy.deny.setdefault(lang, [])
+    if term in current_deny:
+        return {"ok": True, "term": term, "lang": lang, "message": "Term already present"}
+
+    # Add and verify against regression test suite
+    current_deny.append(term)
+    from ..policy.regression_set import REGRESSION_SET, evaluate, run_all
+    failures = run_all(services.policy)
+    conflicts = [k for k, v in failures.items() if v]
+
+    # Verify that approved cross-script outputs in REGRESSION_SET are not withheld by this deny term
+    checked = [c for c in REGRESSION_SET if c.dst == lang and c.src != lang]
+    for case in checked:
+        rendered = evaluate(case, services.policy)
+        hits = deny_scan(rendered, case.dst, services.policy)
+        if hits:
+            conflicts.append(f"{case.id} (forbidden hit on rendered output: {hits})")
+
+    if conflicts:
+        # Conflict detected! Revert addition
+        current_deny.remove(term)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot add forbidden term '{term}': conflicts with regression case(s): {', '.join(conflicts[:3])}",
+        )
+
+    # Persist in DB if configured
+    if dbmod.is_configured():
+        from ..store.models import DenyTerm
+        try:
+            async with dbmod.session() as s:
+                dt = DenyTerm(
+                    policy_version=services.policy.version,
+                    lang=lang,
+                    term=term,
+                )
+                s.add(dt)
+                await s.commit()
+        except Exception as exc:  # noqa: BLE001
+            pass
+
+    return {"ok": True, "term": term, "lang": lang, "message": "Forbidden term added and regression verified"}
+
+
+@router.delete("/policy/deny-terms", dependencies=[Depends(require_admin)])
+async def delete_deny_term(lang: str, term: str, request: Request):
+    """Remove a custom forbidden output term."""
+    lang = lang.lower().strip()
+    term = term.strip()
+    services: Services = request.app.state.services
+    current_deny = services.policy.deny.get(lang, [])
+    if term in current_deny:
+        current_deny.remove(term)
+
+    if dbmod.is_configured():
+        from sqlalchemy import delete
+        from ..store.models import DenyTerm
+        try:
+            async with dbmod.session() as s:
+                await s.execute(
+                    delete(DenyTerm).where(
+                        DenyTerm.policy_version == services.policy.version,
+                        DenyTerm.lang == lang,
+                        DenyTerm.term == term,
+                    )
+                )
+                await s.commit()
+        except Exception as exc:  # noqa: BLE001
+            pass
+
+    return {"ok": True, "term": term, "lang": lang}
 
 
 # ---- Provider Management --------------------------------------------------

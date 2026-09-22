@@ -69,9 +69,19 @@ def validate_token(token: str | None) -> bool:
     return hmac.compare_digest(token, legacy)
 
 
+def _get_client_ip(request: Request) -> str:
+    cf_ip = request.headers.get("cf-connecting-ip")
+    if cf_ip:
+        return cf_ip.strip()
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
 def check_login_rate_limit(request: Request) -> None:
     """Check sliding window failed attempts per client IP."""
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = _get_client_ip(request)
     now = time.time()
     q = _login_failures[client_ip]
     while q and (now - q[0] > LOCKOUT_WINDOW_S):
@@ -86,12 +96,12 @@ def check_login_rate_limit(request: Request) -> None:
 
 
 def record_login_failure(request: Request) -> None:
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = _get_client_ip(request)
     _login_failures[client_ip].append(time.time())
 
 
 def record_login_success(request: Request) -> None:
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = _get_client_ip(request)
     _login_failures.pop(client_ip, None)
 
 

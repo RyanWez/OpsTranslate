@@ -104,6 +104,12 @@ async def lifespan(app: FastAPI):
     if missing:
         log.warning("missing configuration for live run: %s", ", ".join(missing))
 
+    if config.get("ADMIN_PASSWORD", "admin123") == "admin123":
+        log.warning(
+            "SECURITY WARNING: ADMIN_PASSWORD is set to default 'admin123'. "
+            "Please set a strong custom ADMIN_PASSWORD in your environment variables for production!"
+        )
+
     bot = Bot(token=config.BOT_TOKEN or "0:placeholder", session=config.telegram_session())
     services = build_services(bot)
     dp = Dispatcher()

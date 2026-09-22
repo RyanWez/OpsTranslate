@@ -308,6 +308,41 @@ def test_usage_log_model_accepts_provider():
     assert log_row.provider == "gemini-flash"
 
 
+def test_dynamic_deny_terms_management(client, auth_headers):
+    # 1. Add valid new deny term
+    res = client.post(
+        "/api/admin/policy/deny-terms",
+        json={"lang": "en", "term": "forbidden_crypto_xyz"},
+        headers=auth_headers,
+    )
+    assert res.status_code == 200
+    assert res.json()["ok"] is True
+
+    # Verify it is in policy
+    pol = client.get("/api/admin/policy", headers=auth_headers).json()
+    assert "forbidden_crypto_xyz" in pol["deny_terms"]["en"]
+
+    # 2. Attempt to add a term that breaks regression suite (e.g. "Amount" or "User ID")
+    res_bad = client.post(
+        "/api/admin/policy/deny-terms",
+        json={"lang": "en", "term": "Amount"},
+        headers=auth_headers,
+    )
+    assert res_bad.status_code == 400
+    assert "conflicts with regression case" in res_bad.json()["detail"]
+
+    # 3. Delete the valid term
+    del_res = client.delete(
+        "/api/admin/policy/deny-terms?lang=en&term=forbidden_crypto_xyz",
+        headers=auth_headers,
+    )
+    assert del_res.status_code == 200
+
+    pol_after = client.get("/api/admin/policy", headers=auth_headers).json()
+    assert "forbidden_crypto_xyz" not in pol_after["deny_terms"]["en"]
+
+
+
 
 
 

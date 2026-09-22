@@ -31,6 +31,10 @@ export const api = {
       failed: number
       results: Record<string, string[]>
     }>('/policy/test-regression'),
+  addDenyTerm: (payload: { lang: string; term: string }) =>
+    apiClient.post<{ ok: boolean; term: string; lang: string; message: string }>('/policy/deny-terms', payload),
+  deleteDenyTerm: (lang: string, term: string) =>
+    apiClient.delete<{ ok: boolean; term: string; lang: string }>('/policy/deny-terms', { params: { lang, term } }),
 
   // Providers
   getProviders: () => apiClient.get<{ providers: ProviderItem[] }>('/providers'),

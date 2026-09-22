@@ -12,7 +12,11 @@ import {
   NTabPane,
   NSpin,
   NModal,
+  NSelect,
+  NForm,
+  NFormItem,
   useMessage,
+  useDialog,
 } from 'naive-ui'
 import {
   ShieldCheckmarkOutline,
@@ -22,11 +26,13 @@ import {
   PlayCircleOutline,
   CheckmarkCircleOutline,
   CloseCircleOutline,
+  AddOutline,
 } from '@vicons/ionicons5'
 import type { PolicyConcept } from '../types'
 
 const policyStore = usePolicyStore()
 const message = useMessage()
+const dialog = useDialog()
 const runningRegression = ref(false)
 const showRegressionModal = ref(false)
 const regressionResults = ref<{
@@ -36,6 +42,63 @@ const regressionResults = ref<{
   failed: number
   results: Record<string, string[]>
 } | null>(null)
+
+const showAddDenyModal = ref(false)
+const addingDenyTerm = ref(false)
+const denyForm = ref({
+  lang: 'en',
+  term: '',
+})
+
+const langOptions = [
+  { label: 'English (en)', value: 'en' },
+  { label: 'Myanmar (my)', value: 'my' },
+  { label: 'Chinese (zh)', value: 'zh' },
+]
+
+function openAddDenyModal(defaultLang = 'en') {
+  denyForm.value = { lang: defaultLang, term: '' }
+  showAddDenyModal.value = true
+}
+
+async function handleAddDenyTerm() {
+  if (!denyForm.value.term.trim()) {
+    message.warning('Please enter a term')
+    return
+  }
+  addingDenyTerm.value = true
+  try {
+    const res = await api.addDenyTerm({
+      lang: denyForm.value.lang,
+      term: denyForm.value.term.trim(),
+    })
+    message.success(res.data.message || 'Forbidden term added')
+    showAddDenyModal.value = false
+    await policyStore.fetchPolicy()
+  } catch (err: any) {
+    message.error(err.response?.data?.detail || 'Failed to add forbidden term')
+  } finally {
+    addingDenyTerm.value = false
+  }
+}
+
+function handleDeleteDenyTerm(lang: string, term: string) {
+  dialog.warning({
+    title: 'Confirm Removal',
+    content: `Remove "${term}" from forbidden terms (${lang.toUpperCase()})?`,
+    positiveText: 'Remove',
+    negativeText: 'Cancel',
+    onPositiveClick: async () => {
+      try {
+        await api.deleteDenyTerm(lang, term)
+        message.success(`Term "${term}" removed`)
+        await policyStore.fetchPolicy()
+      } catch (err: any) {
+        message.error(err.response?.data?.detail || 'Failed to remove term')
+      }
+    },
+  })
+}
 
 async function handleRunRegression() {
   runningRegression.value = true
@@ -262,14 +325,22 @@ const columns = [
               <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <!-- English Deny Terms -->
                 <div class="space-y-2">
-                  <h3 class="text-sm font-semibold text-gray-200">English Forbidden Terms</h3>
+                  <div class="flex items-center justify-between">
+                    <h3 class="text-sm font-semibold text-gray-200">English Forbidden Terms</h3>
+                    <NButton size="tiny" secondary type="error" @click="openAddDenyModal('en')">
+                      <template #icon><AddOutline /></template>
+                      Add Term
+                    </NButton>
+                  </div>
                   <div class="p-4 rounded-xl bg-gray-900/80 border border-gray-800 flex flex-wrap gap-1.5 max-h-96 overflow-y-auto">
                     <NTag
                       v-for="term in policyStore.policy?.deny_terms?.en || []"
                       :key="term"
                       size="small"
                       type="error"
-                      class="font-mono text-xs"
+                      closable
+                      class="font-mono text-xs cursor-pointer"
+                      @close="handleDeleteDenyTerm('en', term)"
                     >
                       {{ term }}
                     </NTag>
@@ -278,14 +349,22 @@ const columns = [
 
                 <!-- Myanmar Deny Terms -->
                 <div class="space-y-2">
-                  <h3 class="text-sm font-semibold text-gray-200">Myanmar Forbidden Terms</h3>
+                  <div class="flex items-center justify-between">
+                    <h3 class="text-sm font-semibold text-gray-200">Myanmar Forbidden Terms</h3>
+                    <NButton size="tiny" secondary type="error" @click="openAddDenyModal('my')">
+                      <template #icon><AddOutline /></template>
+                      Add Term
+                    </NButton>
+                  </div>
                   <div class="p-4 rounded-xl bg-gray-900/80 border border-gray-800 flex flex-wrap gap-1.5 max-h-96 overflow-y-auto">
                     <NTag
                       v-for="term in policyStore.policy?.deny_terms?.my || []"
                       :key="term"
                       size="small"
                       type="error"
-                      class="text-xs"
+                      closable
+                      class="text-xs cursor-pointer"
+                      @close="handleDeleteDenyTerm('my', term)"
                     >
                       {{ term }}
                     </NTag>
@@ -373,5 +452,42 @@ const columns = [
         </div>
       </div>
     </NModal>
+
+    <!-- Add Forbidden Term Modal -->
+    <NModal
+      v-model:show="showAddDenyModal"
+      preset="card"
+      title="Add Forbidden Output Term (Layer 3)"
+      class="max-w-md bg-gray-900 border border-gray-800"
+      :bordered="false"
+    >
+      <NForm :model="denyForm" label-placement="top">
+        <NFormItem label="Target Output Language" required>
+          <NSelect v-model:value="denyForm.lang" :options="langOptions" />
+        </NFormItem>
+        <NFormItem label="Forbidden Word / Term" required>
+          <NInput
+            v-model:value="denyForm.term"
+            placeholder="e.g. casino, slot, bonus"
+            clearable
+            @keyup.enter="handleAddDenyTerm"
+          />
+        </NFormItem>
+        <div class="text-[11px] text-gray-400 bg-gray-800/40 p-2.5 rounded-lg mb-4 border border-gray-700/40">
+          <strong class="text-amber-400">Safety Guard:</strong> Adding a term will automatically run against the 40-case Regression Suite. If this term conflicts with approved legitimate output terms, the addition will be blocked.
+        </div>
+        <div class="flex justify-end space-x-2">
+          <NButton @click="showAddDenyModal = false">Cancel</NButton>
+          <NButton
+            type="error"
+            :loading="addingDenyTerm"
+            @click="handleAddDenyTerm"
+          >
+            Add & Verify
+          </NButton>
+        </div>
+      </NForm>
+    </NModal>
   </div>
 </template>
+
