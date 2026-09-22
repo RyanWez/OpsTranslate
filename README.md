@@ -4,8 +4,8 @@ Telegram translation bot with a **term-policy engine** (no free translation of
 sensitive gaming/ops terminology) and **entity protection** (URLs, @mentions,
 numbers and /commands pass through untouched).
 
-Scope: MY ↔ EN (auto toggle; Chinese cut from scope in v3.2 — confident CJK is rejected with `UNSUPPORTED_LANG`). This v1 ships **polling** (local testing) and
-**webhook** (production) modes. No admin dashboard.
+Scope: MY ↔ EN (auto toggle; Chinese cut from scope in v3.2 — confident CJK is rejected with `UNSUPPORTED_LANG`). Ships **polling** (local testing) and
+**webhook** (production) modes. Includes Vue 3 Web Admin Dashboard at `/admin`.
 
 ## Quick start (local polling test)
 
@@ -127,5 +127,17 @@ The schema logs **metadata only** (`usage_log` has no message-text column).
 - Hot-path DB removal (P1.4 §08-02): `is_allowed`, `get_target`, `daily_soft_cap` are memoized 60 s in-process via `UserStore` and `groupgate` reuses `services.user_store` instead of constructing a fresh `UserStore()` per message, so a steady-state message issues 0 Postgres queries after the first minute.
 - Alerting completion (P1.3 MUST 11): `PROVIDER_CIRCUIT_OPEN` (P2) on breaker open, `CACHE_UNREACHABLE`/`DB_UNREACHABLE` (P1) via cache `ping` and `/healthz`, watchdog every 60 s for `HIGH_ERROR_RATE` (>5 %/5 min, P2), `HIGH_P95_LATENCY` (>4 s, P2), `POLICY_ENGINE_ERROR_RATE` (>20 %, P1), P3 `DAILY_DIGEST` at 09:00 Asia/Yangon and P3 `UNKNOWN_WHOAMI` on `/whoami` from a non-member. Every alert resolves (`resolve()`) when the condition clears and never carries message text.
 - `AUTO_TOGGLE` (default `true`, see `.env.example`) implements v3.2 owner change: Myanmar input → English, English input → Myanmar, `auto` keeps the stored target.
+- `/report` command (spec §12): staff can reply to any message with `/report [reason]` to send a privacy-compliant alert (P3 `TRANSLATION_REPORT`) to admin Telegram for investigation.
 
--curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb && sudo dpkg -i cloudflared.deb
+## Admin Control Center (`/admin`)
+
+The bot embeds a Vue 3 + Naive UI Admin Dashboard served at `/admin`:
+- **Overview**: Real-time traffic, latency charts, circuit breaker states, today's spend estimate.
+- **Providers**: Dynamic AI model management, breaker states, connection latency test.
+- **Policy**: Zero-gaming dictionary inspection, Layer 3 deny rules, and executable 40-case regression suite runner.
+- **Audit Logs**: Real-time SSE audit logging, date-time range filter, provider filter.
+- **Staff / Users**: Manage Telegram user allowlist, roles (`admin` / `staff`), and daily soft caps.
+- **Playground**: Sandbox environment to test entity protection and asymmetric translation policies.
+
+Authentication uses timed HMAC-SHA256 session tokens with cookie credentials and brute-force rate limiting. Configure `ADMIN_PASSWORD` in your `.env`.
+

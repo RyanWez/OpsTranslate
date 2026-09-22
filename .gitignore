@@ -30,6 +30,7 @@ Thumbs.db
 
 # Local run artefacts
 *.log
+*.deb
 data/
 
 

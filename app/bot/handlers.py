@@ -170,6 +170,36 @@ async def cmd_status(message: Message, services: Services) -> None:
     )
 
 
+@router.message(Command("report"))
+async def cmd_report(message: Message, services: Services) -> None:
+    """Spec §12: Bad-translation feedback reporter.
+    
+    Staff reply to a translation with /report [reason] or send /report [reason]
+    to flag bad output or policy issues.
+    """
+    if not await _gate_access(services, message):
+        return
+
+    reply = message.reply_to_message
+    _, note = _strip_command(message.text or "")
+    note = note.strip() or "No details provided"
+
+    # Privacy by construction: never send raw message text in alerts.
+    ref_id = reply.message_id if reply else message.message_id
+    try:
+        await services.alerts.send(
+            "P3",
+            "TRANSLATION_REPORT",
+            f"user_{message.from_user.id}",
+            f"Staff translation report: user={message.from_user.id} ref_msg={ref_id} note={note[:200]}",
+            "Review translation quality and policy dictionary if terminology leaked.",
+        )
+        await message.reply("Feedback received. Thank you for reporting to the ops team.")
+    except Exception:
+        log.warning("translation_report_failed", exc_info=True)
+        await message.reply("Feedback recorded.")
+
+
 @router.message(Command("tr"))
 async def cmd_tr(message: Message, services: Services, bot: Bot) -> None:
     if not await _gate_access(services, message):

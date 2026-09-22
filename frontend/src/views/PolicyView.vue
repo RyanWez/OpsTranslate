@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed, h } from 'vue'
 import { usePolicyStore } from '../stores/policy'
+import { api } from '../api'
 import {
   NCard,
   NButton,
@@ -10,16 +11,49 @@ import {
   NTabs,
   NTabPane,
   NSpin,
+  NModal,
+  useMessage,
 } from 'naive-ui'
 import {
   ShieldCheckmarkOutline,
   RefreshOutline,
   SearchOutline,
   AlertCircleOutline,
+  PlayCircleOutline,
+  CheckmarkCircleOutline,
+  CloseCircleOutline,
 } from '@vicons/ionicons5'
 import type { PolicyConcept } from '../types'
 
 const policyStore = usePolicyStore()
+const message = useMessage()
+const runningRegression = ref(false)
+const showRegressionModal = ref(false)
+const regressionResults = ref<{
+  ok: boolean
+  total: number
+  passed: number
+  failed: number
+  results: Record<string, string[]>
+} | null>(null)
+
+async function handleRunRegression() {
+  runningRegression.value = true
+  try {
+    const res = await api.testPolicyRegression()
+    regressionResults.value = res.data
+    showRegressionModal.value = true
+    if (res.data.ok) {
+      message.success(`Regression Suite Passed! (${res.data.passed}/${res.data.total} cases)`)
+    } else {
+      message.error(`Regression Suite: ${res.data.failed} cases failed`)
+    }
+  } catch (err: any) {
+    message.error(err.response?.data?.detail || 'Failed to run regression tests')
+  } finally {
+    runningRegression.value = false
+  }
+}
 
 onMounted(() => {
   policyStore.fetchPolicy()
@@ -138,6 +172,12 @@ const columns = [
         </p>
       </div>
       <div class="flex items-center space-x-3">
+        <NButton type="primary" size="small" @click="handleRunRegression" :loading="runningRegression">
+          <template #icon>
+            <PlayCircleOutline />
+          </template>
+          Run 40-Case Regression Suite
+        </NButton>
         <NButton secondary size="small" @click="policyStore.fetchPolicy" :loading="policyStore.loading">
           <template #icon>
             <RefreshOutline />
@@ -292,5 +332,46 @@ const columns = [
         </NTabs>
       </NCard>
     </NSpin>
+
+    <!-- Regression Test Results Modal -->
+    <NModal
+      v-model:show="showRegressionModal"
+      preset="card"
+      title="Policy 40-Case Regression Test Results"
+      class="max-w-2xl bg-gray-900 border border-gray-800"
+      :bordered="false"
+    >
+      <div v-if="regressionResults" class="space-y-4">
+        <div class="flex items-center justify-between p-3 rounded-lg bg-gray-800/60 border border-gray-700/50">
+          <div class="flex items-center space-x-2">
+            <CheckmarkCircleOutline v-if="regressionResults.ok" class="w-5 h-5 text-emerald-400" />
+            <CloseCircleOutline v-else class="w-5 h-5 text-rose-400" />
+            <span class="font-semibold text-sm text-gray-200">
+              {{ regressionResults.ok ? 'All Regression Cases Passed' : 'Regression Failures Detected' }}
+            </span>
+          </div>
+          <NTag :type="regressionResults.ok ? 'success' : 'error'" size="small">
+            {{ regressionResults.passed }} / {{ regressionResults.total }} Passed
+          </NTag>
+        </div>
+
+        <div class="max-h-96 overflow-y-auto space-y-2 pr-1">
+          <div
+            v-for="(problems, caseId) in regressionResults.results"
+            :key="caseId"
+            class="flex items-start justify-between p-2.5 rounded-lg bg-gray-950/50 border text-xs"
+            :class="problems.length ? 'border-rose-900/50 text-rose-300' : 'border-gray-800/60 text-gray-300'"
+          >
+            <div class="font-mono font-medium">{{ caseId }}</div>
+            <div v-if="!problems.length">
+              <NTag size="tiny" type="success" :bordered="false">PASS</NTag>
+            </div>
+            <div v-else class="text-right text-rose-400">
+              <span v-for="p in problems" :key="p">{{ p }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </NModal>
   </div>
 </template>

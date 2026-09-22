@@ -32,7 +32,16 @@ from ..store.providers import (
 )
 from fastapi.responses import StreamingResponse
 from .sse import broadcaster, sse_event_stream
-from .auth import get_expected_token, is_authenticated, require_admin, verify_password
+from .auth import (
+    check_login_rate_limit,
+    create_session_token,
+    get_expected_token,
+    is_authenticated,
+    record_login_failure,
+    record_login_success,
+    require_admin,
+    verify_password,
+)
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -98,12 +107,15 @@ class PlaygroundRequest(BaseModel):
 
 @router.post("/login")
 async def login(req: LoginRequest, request: Request, response: Response):
+    check_login_rate_limit(request)
     if not verify_password(req.password):
+        record_login_failure(request)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect admin password.",
         )
-    token = get_expected_token()
+    record_login_success(request)
+    token = create_session_token()
     is_https = request.headers.get("x-forwarded-proto") == "https" or request.url.scheme == "https"
     response.set_cookie(
         key="admin_session",
@@ -193,6 +205,24 @@ async def get_policy():
         "version": config.POLICY_VERSION,
         "concepts": concepts_out,
         "deny_terms": DENY_TERMS,
+    }
+
+
+@router.post("/policy/test-regression", dependencies=[Depends(require_admin)])
+async def test_policy_regression(request: Request):
+    """Run the 40-case regression set and return detailed diagnostics."""
+    services: Services = request.app.state.services
+    from ..policy.regression_set import REGRESSION_SET, run_all
+    results = run_all(services.policy)
+    failed_cases = {k: v for k, v in results.items() if v}
+    total = len(REGRESSION_SET)
+    passed = total - len(failed_cases)
+    return {
+        "ok": len(failed_cases) == 0,
+        "total": total,
+        "passed": passed,
+        "failed": len(failed_cases),
+        "results": results,
     }
 
 
@@ -291,8 +321,8 @@ async def create_provider(payload: ProviderPayload, request: Request):
             return {"ok": True, "id": new_provider_id, "message": "Provider created and router reloaded."}
         except HTTPException:
             raise
-        except Exception:
-            pass
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Database error creating provider: {exc}")
 
     # File-backed persistence (data/providers.json)
     stored = load_stored_providers()
@@ -350,8 +380,10 @@ async def update_provider(provider_id: str, payload: ProviderPayload, request: R
                     broadcaster.broadcast("providers_changed", {"action": "update", "id": provider_id, "name": payload.name})
                     broadcaster.broadcast("overview_changed", {})
                     return {"ok": True, "message": "Provider updated and router reloaded."}
-        except Exception:
-            pass
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Database error updating provider: {exc}")
 
     # File-backed persistence
     stored = load_stored_providers()
@@ -405,8 +437,10 @@ async def delete_provider(provider_id: str, request: Request):
                     broadcaster.broadcast("providers_changed", {"action": "delete", "id": provider_id})
                     broadcaster.broadcast("overview_changed", {})
                     return {"ok": True, "message": "Provider deleted and router reloaded."}
-        except Exception:
-            pass
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Database error deleting provider: {exc}")
 
     # File-backed persistence
     stored = load_stored_providers()
@@ -436,15 +470,31 @@ async def test_provider(req: TestProviderRequest):
 
     # 1. If key is blank or contains masked bullet characters (•), retrieve real unmasked key
     if not api_key or "•" in api_key:
-        stored = load_stored_providers()
-        for p in stored:
-            is_match = (
-                (req.id is not None and (str(p.get("id")) == str(req.id) or p.get("name") == str(req.id)))
-                or (p.get("base_url", "").rstrip("/") == base and p.get("model") == req.model)
-            )
-            if is_match and p.get("api_key"):
-                api_key = p["api_key"]
-                break
+        if dbmod.is_configured():
+            try:
+                from sqlalchemy import select
+                async with dbmod.session() as sess:
+                    p = None
+                    if req.id is not None and str(req.id).isdigit():
+                        p = (await sess.execute(select(DBProvider).where(DBProvider.id == int(req.id)))).scalar_one_or_none()
+                    if not p and req.id is not None:
+                        p = (await sess.execute(select(DBProvider).where(DBProvider.name == str(req.id)))).scalar_one_or_none()
+                    if not p:
+                        p = (await sess.execute(select(DBProvider).where(DBProvider.base_url == base, DBProvider.model == req.model))).scalars().first()
+                    if p and p.api_key:
+                        api_key = p.api_key
+            except Exception:
+                pass
+        if not api_key or "•" in api_key:
+            stored = load_stored_providers()
+            for p in stored:
+                is_match = (
+                    (req.id is not None and (str(p.get("id")) == str(req.id) or p.get("name") == str(req.id)))
+                    or (p.get("base_url", "").rstrip("/") == base and p.get("model") == req.model)
+                )
+                if is_match and p.get("api_key"):
+                    api_key = p["api_key"]
+                    break
 
     # 2. Check if key is available
     if not api_key:
@@ -636,32 +686,59 @@ async def test_playground(req: PlaygroundRequest, request: Request):
     src_lang = "en" if detected == "latin" else "my"
     dst_lang = req.dst or resolve_toggle_dst(src_lang, "en")
     
-    # 2. Entity & Term policy masking
+    # 2. Entity & Term policy handling (aligned with asymmetric translate_policied)
     protected_text, entity_restore = protect_entities(req.text)
-    masked_text = mask(protected_text, src_lang, services.policy)
-    policy_hits = [m.group(1) for m in PLACEHOLDER_RE.finditer(masked_text)]
-    
-    # 3. Provider translation
-    system_prompt = build_system_prompt(src_lang, dst_lang, services.policy)
-    try:
-        raw_output, provider_name = await services.router.translate(masked_text, system_prompt)
-    except Exception as exc:
-        return {
-            "ok": False,
-            "error": str(exc),
-            "src_lang": src_lang,
-            "dst_lang": dst_lang,
-            "masked_text": masked_text,
-            "policy_hits": list(policy_hits),
-        }
-    
-    # 4. Deny scanning, rendering, & sanitization
-    denial_hits = deny_scan(raw_output, dst_lang, services.policy)
-    rendered_output = render(raw_output, dst_lang, services.policy)
-    sanitized_output = sanitize_leaks(rendered_output, dst_lang)
-    
-    # 5. Restore entities
-    final_output = restore_entities(sanitized_output, entity_restore)
+
+    if dst_lang == "my":
+        # Relaxed path: Global -> Myanmar (unmasked, natural colleague phrasing)
+        masked_text = protected_text
+        policy_hits = []
+        system_prompt = build_system_prompt(src_lang, dst_lang, services.policy)
+        try:
+            raw_output, provider_name = await services.router.translate(protected_text, system_prompt)
+        except Exception as exc:
+            return {
+                "ok": False,
+                "error": str(exc),
+                "src_lang": src_lang,
+                "dst_lang": dst_lang,
+                "masked_text": masked_text,
+                "policy_hits": [],
+            }
+        denial_hits = []
+        final_output = restore_entities(raw_output, entity_restore)
+        final_output = sanitize_leaks(final_output, dst="my")
+    else:
+        # Full policy path: Myanmar -> English (term masking + repair)
+        masked_text = mask(protected_text, src_lang, services.policy)
+        policy_hits = [m.group(1) for m in PLACEHOLDER_RE.finditer(masked_text)]
+        system_prompt = build_system_prompt(src_lang, dst_lang, services.policy)
+        try:
+            raw_output, provider_name = await services.router.translate(masked_text, system_prompt)
+        except Exception as exc:
+            return {
+                "ok": False,
+                "error": str(exc),
+                "src_lang": src_lang,
+                "dst_lang": dst_lang,
+                "masked_text": masked_text,
+                "policy_hits": list(policy_hits),
+            }
+        rendered_output = render(raw_output, dst_lang, services.policy)
+        denial_hits = deny_scan(rendered_output, dst_lang, services.policy)
+        if denial_hits:
+            try:
+                from ..policy.policy import strict_suffix
+                raw_output, provider_name = await services.router.translate(
+                    masked_text, system_prompt + strict_suffix(denial_hits), force=provider_name
+                )
+                rendered_output = render(raw_output, dst_lang, services.policy)
+                denial_hits = deny_scan(rendered_output, dst_lang, services.policy)
+            except Exception:
+                pass
+        sanitized_output = sanitize_leaks(rendered_output, dst_lang)
+        final_output = restore_entities(sanitized_output, entity_restore)
+        final_output = sanitize_leaks(final_output, dst=dst_lang)
     latency_ms = int((time.monotonic() - t0) * 1000)
 
     try:
@@ -734,7 +811,7 @@ async def get_logs(
         norm_status = 200 if st == "ok" else st
         prov = raw.get("provider")
         if not prov or prov == "unknown":
-            prov = "Gemini"
+            prov = "cache" if raw.get("cache_hit") else "default"
         return {
             "id": raw.get("id"),
             "user_id": raw.get("user_id", 0),
@@ -790,7 +867,7 @@ async def get_logs(
                     "id": r.id,
                     "user_id": r.user_id,
                     "char_len": r.char_len,
-                    "provider": getattr(r, "provider", None) or "Gemini",
+                    "provider": getattr(r, "provider", None) or ("cache" if getattr(r, "cache_hit", False) else "default"),
                     "latency_ms": r.latency_ms,
                     "status": 200 if r.status == "ok" else r.status,
                     "policy_hits": r.policy_hits or [],

@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { api } from '../api'
+import { useRealtimeStore } from './realtime'
 import type { ProviderItem, ProviderPayload, TestProviderResult } from '../types'
 
 export const useProvidersStore = defineStore('providers', () => {
@@ -29,7 +30,10 @@ export const useProvidersStore = defineStore('providers', () => {
     fetchProviders()
     liveSyncTimer = setInterval(() => {
       if (document.visibilityState !== 'hidden') {
-        fetchProviders(true)
+        const realtimeStore = useRealtimeStore()
+        if (!realtimeStore.isConnected) {
+          fetchProviders(true)
+        }
       }
     }, intervalMs)
   }

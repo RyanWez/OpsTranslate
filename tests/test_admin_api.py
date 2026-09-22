@@ -171,6 +171,14 @@ def test_admin_providers_update_and_delete_in_memory(client, auth_headers):
 
 
 def test_admin_audit_logs_fallback(client, auth_headers):
+    app.state.services.stats.record_usage_log({
+        "user_id": 999111,
+        "char_len": 30,
+        "provider": "openai",
+        "latency_ms": 250,
+        "status": 200,
+        "policy_hits": [],
+    })
     res = client.get("/api/admin/logs", headers=auth_headers)
     assert res.status_code == 200
     data = res.json()
@@ -217,6 +225,16 @@ def test_admin_provider_toggle_and_anthropic_test(client, auth_headers):
 
 
 def test_admin_logs_date_range_filtering(client, auth_headers):
+    # Explicitly record test log so test is self-contained
+    app.state.services.stats.record_usage_log({
+        "user_id": 111222,
+        "char_len": 25,
+        "provider": "gemini",
+        "latency_ms": 120,
+        "status": 200,
+        "policy_hits": [],
+    })
+
     # Query with future date range (should return 0 logs)
     res = client.get("/api/admin/logs?start_time=2099-01-01&end_time=2099-01-02", headers=auth_headers)
     assert res.status_code == 200
@@ -230,8 +248,65 @@ def test_admin_logs_date_range_filtering(client, auth_headers):
     # Query with provider filter
     res = client.get("/api/admin/logs?provider=gemini", headers=auth_headers)
     assert res.status_code == 200
+    assert len(res.json()["logs"]) > 0
     for l in res.json()["logs"]:
         assert l["provider"].lower() == "gemini"
+
+
+def test_admin_policy_regression_endpoint(client, auth_headers):
+    res = client.post("/api/admin/policy/test-regression", headers=auth_headers)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["ok"] is True
+    assert data["total"] == 40
+    assert data["passed"] == 40
+    assert data["failed"] == 0
+    assert "results" in data
+
+
+def test_admin_login_rate_limiting(client, monkeypatch):
+    from app.admin.auth import _login_failures
+    _login_failures.clear()
+    monkeypatch.setattr(config, "get", lambda k, default="": "correct-pass" if k == "ADMIN_PASSWORD" else default)
+
+    # 5 consecutive failed attempts
+    for _ in range(5):
+        res = client.post("/api/admin/login", json={"password": "wrong-attempt"})
+        assert res.status_code == 401
+
+    # 6th attempt should be blocked with 429 Too Many Requests
+    res = client.post("/api/admin/login", json={"password": "wrong-attempt"})
+    assert res.status_code == 429
+    assert "Too many failed login attempts" in res.json()["detail"]
+
+    # Clear lockout for subsequent tests
+    _login_failures.clear()
+
+
+def test_admin_token_validation(monkeypatch):
+    import time
+    from app.admin.auth import create_session_token, validate_token
+
+    monkeypatch.setattr(config, "get", lambda k, default="": "test-key" if k == "ADMIN_PASSWORD" else default)
+
+    # Valid token
+    valid_token = create_session_token(duration_s=3600)
+    assert validate_token(valid_token) is True
+
+    # Expired token
+    expired_token = create_session_token(duration_s=-10)
+    assert validate_token(expired_token) is False
+
+    # Tampered token
+    tampered = valid_token[:-4] + "ffff"
+    assert validate_token(tampered) is False
+
+
+def test_usage_log_model_accepts_provider():
+    from app.store.models import UsageLog
+    log_row = UsageLog(user_id=12345, provider="gemini-flash", char_len=50)
+    assert log_row.provider == "gemini-flash"
+
 
 
 

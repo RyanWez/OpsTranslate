@@ -28,32 +28,6 @@ class Stats:
         self._recent_policy_errors: deque[float] = deque(maxlen=500)
         self.recent_logs: deque[dict] = deque(maxlen=1000)
         self._log_counter: int = 0
-        self._seed_initial_logs()
-
-    def _seed_initial_logs(self) -> None:
-        """Seed initial diagnostic logs so admin log explorer displays data on boot."""
-        boot_time = time.strftime("%Y-%m-%d %H:%M:%S")
-        self.recent_logs.append({
-            "id": 1,
-            "user_id": 8639870216,
-            "char_len": 42,
-            "provider": "gemini",
-            "latency_ms": 340,
-            "status": 200,
-            "policy_hits": ["platform", "user_id"],
-            "created_at": boot_time,
-        })
-        self.recent_logs.append({
-            "id": 2,
-            "user_id": 8639870216,
-            "char_len": 18,
-            "provider": "vsllm-primary",
-            "latency_ms": 480,
-            "status": 200,
-            "policy_hits": ["deposit"],
-            "created_at": boot_time,
-        })
-        self._log_counter = 2
 
     def record_usage_log(self, fields: dict) -> None:
         self._log_counter += 1

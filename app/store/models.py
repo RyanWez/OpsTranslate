@@ -194,6 +194,7 @@ class UsageLog(Base):
     dst_lang: Mapped[str | None] = mapped_column(String(8))
     text_hash: Mapped[str | None] = mapped_column(String(16))
     char_len: Mapped[int | None] = mapped_column(Integer)
+    provider: Mapped[str | None] = mapped_column(String(64), index=True)
     provider_id: Mapped[int | None] = mapped_column(Integer)
     cache_hit: Mapped[bool | None] = mapped_column(Boolean)
     latency_ms: Mapped[int | None] = mapped_column(Integer)

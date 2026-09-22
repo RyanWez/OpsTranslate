@@ -321,3 +321,15 @@ async def test_lang_button_is_dismissed_for_non_members(monkeypatch):
     await handlers.cb_lang(call, services)
     assert call.answers == [""]                # spinner dismissed...
     assert users.targets_set == []             # ...and nothing changed
+
+
+async def test_cmd_report_sends_alert():
+    bot = FakeBot(me_id=BOT_ID)
+    services = services_with(bot)
+    reply_to = FakeMessage(message_id=99, text="Some translation output")
+    msg = FakeMessage(message_id=100, text="/report wrong terms used", reply_to=reply_to)
+
+    await handlers.cmd_report(msg, services)
+    assert any("Feedback received" in rep for rep in msg.replies)
+    assert any(a[1] == "TRANSLATION_REPORT" for a in services.alerts.sent)
+

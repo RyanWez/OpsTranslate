@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { api } from '../api'
+import { useRealtimeStore } from './realtime'
 import type { UsageLogItem } from '../types'
 
 export function getTodayRange(): [number, number] {
@@ -45,7 +46,10 @@ export const useLogsStore = defineStore('logs', () => {
     fetchLogs()
     liveSyncTimer = setInterval(() => {
       if (document.visibilityState !== 'hidden') {
-        fetchLogs(true)
+        const realtimeStore = useRealtimeStore()
+        if (!realtimeStore.isConnected) {
+          fetchLogs(true)
+        }
       }
     }, intervalMs)
   }

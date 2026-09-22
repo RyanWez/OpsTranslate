@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { api } from '../api'
+import { useRealtimeStore } from './realtime'
 import type { OverviewStats } from '../types'
 
 export const useOverviewStore = defineStore('overview', () => {
@@ -33,7 +34,11 @@ export const useOverviewStore = defineStore('overview', () => {
     fetchOverview()
     timer = setInterval(() => {
       if (document.visibilityState !== 'hidden') {
-        fetchOverview(true)
+        const realtimeStore = useRealtimeStore()
+        // If SSE real-time stream is active, rely on push events; only poll if disconnected
+        if (!realtimeStore.isConnected) {
+          fetchOverview(true)
+        }
       }
     }, intervalMs)
   }

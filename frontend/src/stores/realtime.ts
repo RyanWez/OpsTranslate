@@ -32,7 +32,9 @@ export const useRealtimeStore = defineStore('realtime', () => {
       } catch {}
     }
 
-    const url = token ? `/api/admin/events?token=${encodeURIComponent(token)}` : '/api/admin/events'
+    // In production, cookie handles auth securely via withCredentials without leaking token in URL query logs
+    const isDev = window.location.port === '5173'
+    const url = isDev && token ? `/api/admin/events?token=${encodeURIComponent(token)}` : '/api/admin/events'
 
     try {
       eventSource = new EventSource(url, { withCredentials: true })

@@ -23,6 +23,14 @@ export const api = {
 
   // Policy
   getPolicy: () => apiClient.get<PolicyData>('/policy'),
+  testPolicyRegression: () =>
+    apiClient.post<{
+      ok: boolean
+      total: number
+      passed: number
+      failed: number
+      results: Record<string, string[]>
+    }>('/policy/test-regression'),
 
   // Providers
   getProviders: () => apiClient.get<{ providers: ProviderItem[] }>('/providers'),

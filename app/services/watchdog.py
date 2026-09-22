@@ -128,6 +128,11 @@ async def watchdog_loop(services) -> None:
             await _check_p95(services)
             await _check_policy_engine(services)
             await _maybe_digest(services, last_digest)
+            # Multi-worker / Multi-replica sync: reload active providers from DB if configured
+            from ..store import db as dbmod
+            if dbmod.is_configured():
+                from ..store.providers import sync_router_providers
+                await sync_router_providers(services.router)
         except asyncio.CancelledError:
             break
         except Exception as exc:  # noqa: BLE001
