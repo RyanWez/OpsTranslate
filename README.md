@@ -1,143 +1,214 @@
 # OpsTranslate Bot
 
-Telegram translation bot with a **term-policy engine** (no free translation of
-sensitive gaming/ops terminology) and **entity protection** (URLs, @mentions,
-numbers and /commands pass through untouched).
+Enterprise Telegram translation bot with an **Asymmetric Term-Policy Engine** (preventing sensitive operational/gaming terminology leaks), **Single-Pass Entity Protection** (preserving URLs, `@mentions`, numbers, and `/commands` verbatim), and a **Vue 3 Admin Control Center**.
 
-Scope: MY ↔ EN (auto toggle; Chinese cut from scope in v3.2 — confident CJK is rejected with `UNSUPPORTED_LANG`). Ships **polling** (local testing) and
-**webhook** (production) modes. Includes Vue 3 Web Admin Dashboard at `/admin`.
+---
 
-## Quick start (local polling test)
+## Key Features & Architecture
 
-Needs only: Python 3.12, a Telegram bot token, and an OpenAI-compatible
-provider (base URL + API key + model). Neon and Redis are **optional** - the
-bot degrades gracefully without them (in-memory idempotency/cache, silent
-alerts, metadata logging skipped).
+* **Dual Operational Scope**:
+  * **Myanmar → English**: Strict policy engine with term masking, approved neutral rendering, and Layer 3 deny-scan with automatic repair and withhold guards.
+  * **Global / English → Myanmar**: Relaxed, natural translation preserving tone without over-masking Burmese phrasing.
+* **10-Gate Translation Pipeline**:
+  * Gate 1: Webhook Secret Token authentication (`X-Telegram-Bot-Api-Secret-Token`).
+  * Gate 2: Redis sliding-window idempotency (`update_id` deduplication).
+  * Gate 3: Telegram message-type validation (plain text and captions only).
+  * Gate 4: Phase 0 Group Gate (restricts private DM translation to verified members of the operations group).
+  * Gate 5: Dynamic length cap validation (`MAX_INPUT_CHARS`, default 500 characters).
+  * Gate 6: Language detection & automatic directional toggle (MY ↔ EN).
+  * Gate 7: Duplicate request detection within 30 seconds.
+  * Gate 8: User rate-limiting (sliding window: max 2 messages per 30 seconds) + daily soft cap.
+  * Gate 9: Deterministic cache check (keyed by raw text, src, dst, and policy version).
+  * Gate 10: Provider router with circuit breaker, timeout protection, and failover.
+* **Security & Hardening**:
+  * **Encrypted Credentials at Rest**: Third-party AI API keys in PostgreSQL are encrypted using Fernet (AES-128-CBC + HMAC-SHA256).
+  * **Brute-Force Rate Limiter**: Admin login endpoint tracks failed attempts per IP (5 failures = 5-minute lockout with HTTP 429).
+  * **Timed HMAC Sessions**: Admin session tokens use timestamped HMAC-SHA256 signatures with 7-day expiration.
+  * **Privacy Compliance**: No message texts or translation bodies are ever logged; only metadata (`text_hash`, `char_len`, `provider`, `latency_ms`, `policy_hits`).
+* **Operational Tooling**:
+  * Dual-mode PostgreSQL backup & restore CLI (`scripts/backup_db.py`).
+  * 60-second multi-worker provider synchronization in background watchdog.
+  * Deterministic 40-case Policy Regression Suite ensuring translation safety.
 
-```bash
-cd opstranslate-bot
-python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt
+---
 
-export BOT_TOKEN=... PROVIDER_BASE_URL=... PROVIDER_API_KEY=... PROVIDER_MODEL=...
-export MODE=polling TEST_ALLOW_ALL=true
-.venv/bin/python -m uvicorn app.main:app --port 8000
-```
+## Telegram Bot Commands
 
-Open the bot in Telegram and send a message. Useful test inputs:
+| Command | Access | Description |
+|---|---|---|
+| `/start` | Public / Gated | Shows welcome message, operational guidelines, and character limits. |
+| `/help` | Public / Gated | Displays usage instructions, rate limits, and privacy guarantees. |
+| `/whoami` | Public | Returns your Telegram User ID (exempt from group gate to allow onboarding). |
+| `/status` | Admin only | Returns bot status, provider health, circuit breaker states, and uptime. |
+| `/tr [text]` | Staff | Translates inline text or replies to a message to translate it. |
+| `/report [reason]` | Staff | Replies to any translation to report an error (triggers a P3 Telegram admin alert). |
 
-| Input | Expectation |
-|---|---|
-| `မင်္ဂလာပါ` | Translated (Myanmar detected) |
-| `ဂိမ်းအိုင်ဒီ မှားနေတယ်` | `ဂိမ်း` masked to policy term, "User ID" in output |
-| `https://x.co/a @ops 0912345678` | URL / mention / number copied verbatim |
-| `/whoami` | Replies with your user id (works even unregistered) |
-| `/status` | Bot identity + traffic light |
-| 3 messages in <30s | 3rd gets a rate-limit countdown reply |
-| sticker / photo (no caption) | "This message type isn't supported." |
-
-### Credential fields for a live test
-
-| Field | Where from |
-|---|---|
-| `BOT_TOKEN` | @BotFather |
-| `PROVIDER_BASE_URL` | Your OpenAI-compatible provider (e.g. `https://api.example.com/v1`) |
-| `PROVIDER_API_KEY` | Same provider |
-| `PROVIDER_MODEL` | Model name, e.g. `translate-pro` |
-
-Hand them over **transiently** (paste, never commit). Rotate the test bot
-token afterwards (`@BotFather` -> `/revoke`).
-
-## Database (Neon) + seed
-
-```bash
-export DATABASE_URL="postgresql://...neon.tech/db?sslmode=require"
-.venv/bin/alembic upgrade head
-.venv/bin/python -m app.store.seed
-```
-
-With `DATABASE_URL` set, `alembic upgrade head && python -m app.store.seed` also run
-at container start (see `Dockerfile`). Seeding is idempotent: allowlist ids
-from `ALLOWED_USER_IDS` get the `staff` role; ids in `ADMIN_USER_IDS` get
-`admin`; if `ADMIN_USER_IDS` is unset, the first `ALLOWED_USER_IDS` id becomes
-admin.
-
-The schema logs **metadata only** (`usage_log` has no message-text column).
-
-## Deploy to Koyeb (webhook mode)
-
-1. Push this repo to GitHub. Set the GitHub secret `HEALTHZ_URL` to
-   `https://<your-app>.koyeb.app/healthz` (enables the keep-warm workflow).
-2. Koyeb: create a Web Service from the repo. Build: `pip install -r
-   requirements.txt`. Run command: the `Dockerfile`'s default CMD.
-3. Env vars: `MODE=webhook`, `BOT_TOKEN`, `PROVIDER_*`, `PUBLIC_URL`,
-   `WEBHOOK_SECRET`, `WEBHOOK_PATH_SECRET`, `DATABASE_URL`, `REDIS_URL`,
-   `ALLOWED_USER_IDS`, `ADMIN_USER_IDS`.
-4. The bot registers its webhook on startup; Telegram must present the
-   `X-Telegram-Bot-Api-Secret-Token` header or the update is rejected.
-5. External monitor: point an UptimeRobot/BetterStack monitor at
-   `/healthz` and alert your Telegram admin chat (see `ALERT_BOT_TOKEN`,
-   `ADMIN_CHAT_ID`). **This is the dead-man's switch** - if it doesn't fire,
-   nobody knows the bot is down.
-
-## Security notes
-
-- Config is **env-only**; never hardcode secrets or commit `.env`.
-- The provider's API key is sent only to `PROVIDER_BASE_URL`, via HTTPS.
-- Usage logs contain metadata only - no message text, no translation text.
-- P1/P2 alerts never include message content (concept/provider/version only).
-
-## Spec deviations (from `opstranslte-bot-v3.2.html`)
-
-- Placeholders use the spec's Unicode brackets: `⟦T:concept⟧` for
-  term-policy, `⟦E:url:N⟧` / `⟦E:id:N⟧` / `⟦E:mention:N⟧` / `⟦E:cmd:N⟧` for
-  entities (separate namespaces, never mixed).
-- `游戏` added as a `platform` zh variant: the spec's own §4.4 few-shot masks
-  bare `游戏` as `⟦T:platform⟧`; longest-match-first keeps longer concepts
-  (`游戏积分`, `游戏账号`) winning where they overlap.
-- `ဂိမ်းအိုင်ဒီ` (aing spelling of "ID") added as a `user_id` my variant: the
-  spec's §4.4 few-shot input uses this spelling while §4.2 lists only
-  `ဂိမ်းအိုက်ဒီ` (aik). Without it, the few-shot input fragmented into
-  `⟦T:platform⟧⟦T:user_id⟧`; both transliterations now seed the same concept.
-- Layer 3 deny-scan strips separator evasion (spaces, hyphens, dots,
-  zero-width chars) before matching, so `g-a-m-e` still reads as `game`.
-  Fail-closed by design; the P2 alert path absorbs false positives.
-- `policy_hits` in usage metadata reports concepts that actually produced
-  placeholders, not raw substring hits (so `ဂိမ်း` inside `ဂိမ်းအိုင်ဒီ` does
-  not double-count as a platform hit).
-- Backup providers are configured via optional `PROVIDERS_JSON`
-  (`[{"name":...,"base_url":...,"api_key":...,"model":...,"priority":2}]`);
-  without it the single `PROVIDER_*` set is used as before.
-- `/healthz` grants a 10-minute startup grace before the working-hours
-  traffic check can fail; the spec's quiet-hours window (4h) is unchanged.
-- After a **second** policy deny hit the bot sends **nothing**: the
-  "Translating…" placeholder is deleted, no fallback text is shown. The P2
-  alert (concept/provider/version only, never message text) is the
-  staff-visible signal.
-- Input cap is `MAX_INPUT_CHARS` (default 500); UI strings, the Gate 5 check,
-  and the seeded `max_input_chars` setting all read the same value.
-- Provider output budget is `PROVIDER_MAX_OUTPUT_TOKENS` (default 1024). A
-  `finish_reason == "length"` response is treated as a provider failure
-  (failover, never a truncated answer).
-- Delivery is final-only: the validated translation replaces the
-  "Translating…" placeholder in one edit; no intermediate `…` partial frames
-  are sent.
-- Handler budget is `HANDLER_BUDGET_S = 60s` (spec SHOULD 16 says 12s). The live provider's first reasoning-heavy request takes ~11s, so 12s would turn most translations into `ERROR_GENERIC`; 60s is kept as a documented deviation and remains the binding limit before `PROVIDER_TIMEOUT_S` (8s).
-- Wrong-script guard (`policy.script_ok`) is an addition beyond spec §08-03: if the target is Myanmar and the provider answers in pure Latin (or vice-versa) the answer is retried once then withheld as `unstable output (wrong script)` → `ERROR_GENERIC` + P1 `PROVIDER_OUTAGE`. Mixed-script answers (e.g. `Facebook ပါ`) still ship; placeholders are stripped before the check.
-- Fail-soft cache (P1.4): `check_idempotent`, `mark_inflight`, `get`, `put`, `incr`, `get_float`, `incr_float` all degrade to the in-memory `_MemoryStore` on Redis errors, counting consecutive failures and raising P1 `CACHE_UNREACHABLE` once (resolved on recovery). Correctness trade: in-memory idempotency is per-process, best-effort.
-- Hot-path DB removal (P1.4 §08-02): `is_allowed`, `get_target`, `daily_soft_cap` are memoized 60 s in-process via `UserStore` and `groupgate` reuses `services.user_store` instead of constructing a fresh `UserStore()` per message, so a steady-state message issues 0 Postgres queries after the first minute.
-- Alerting completion (P1.3 MUST 11): `PROVIDER_CIRCUIT_OPEN` (P2) on breaker open, `CACHE_UNREACHABLE`/`DB_UNREACHABLE` (P1) via cache `ping` and `/healthz`, watchdog every 60 s for `HIGH_ERROR_RATE` (>5 %/5 min, P2), `HIGH_P95_LATENCY` (>4 s, P2), `POLICY_ENGINE_ERROR_RATE` (>20 %, P1), P3 `DAILY_DIGEST` at 09:00 Asia/Yangon and P3 `UNKNOWN_WHOAMI` on `/whoami` from a non-member. Every alert resolves (`resolve()`) when the condition clears and never carries message text.
-- `AUTO_TOGGLE` (default `true`, see `.env.example`) implements v3.2 owner change: Myanmar input → English, English input → Myanmar, `auto` keeps the stored target.
-- `/report` command (spec §12): staff can reply to any message with `/report [reason]` to send a privacy-compliant alert (P3 `TRANSLATION_REPORT`) to admin Telegram for investigation.
+---
 
 ## Admin Control Center (`/admin`)
 
-The bot embeds a Vue 3 + Naive UI Admin Dashboard served at `/admin`:
-- **Overview**: Real-time traffic, latency charts, circuit breaker states, today's spend estimate.
-- **Providers**: Dynamic AI model management, breaker states, connection latency test.
-- **Policy**: Zero-gaming dictionary inspection, Layer 3 deny rules, and executable 40-case regression suite runner.
-- **Audit Logs**: Real-time SSE audit logging, date-time range filter, provider filter.
-- **Staff / Users**: Manage Telegram user allowlist, roles (`admin` / `staff`), and daily soft caps.
-- **Playground**: Sandbox environment to test entity protection and asymmetric translation policies.
+The bot serves a responsive Single-Page Application (Vue 3, Vite, Tailwind CSS, Naive UI) embedded at `/admin`:
 
-Authentication uses timed HMAC-SHA256 session tokens with cookie credentials and brute-force rate limiting. Configure `ADMIN_PASSWORD` in your `.env`.
+1. **Overview**: Real-time telemetry, latency charts, provider states, and today's spend tracking.
+2. **Providers**: Dynamic AI model management, priority routing, circuit breaker override, and connection testing.
+3. **Policy & Term Glossary**: Inspect concept masking dictionaries, manage Layer 3 forbidden terms dynamically with regression validation, and run the 40-case regression suite.
+4. **Audit Logs**: Real-time Server-Sent Events (SSE) log stream, date-time range picker, and provider filters.
+5. **Staff / Users**: Manage Telegram user allowlist, assign roles (`admin` / `staff`), and set daily message caps.
+6. **Playground**: Interactive sandbox to test asymmetric translations and entity preservation in real-time.
 
+---
+
+## Quick Start (Local Development)
+
+### 1. Requirements
+* Python 3.12+
+* Node.js 18+ (for building the frontend)
+* PostgreSQL (Optional - SQLite / in-memory fallback available)
+* Redis (Optional - in-memory fallback available)
+
+### 2. Installation
+```bash
+git clone https://github.com/RyanWez/OpsTranslate.git
+cd OpsTranslate
+
+# Python virtual environment
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
+# Frontend build (if modifying admin dashboard)
+npm --prefix frontend install
+npm --prefix frontend run build
+```
+
+### 3. Configuration
+Copy `.env.example` to `.env` and fill in your credentials:
+```bash
+cp .env.example .env
+```
+
+Key environment variables:
+```env
+BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
+PROVIDER_BASE_URL=https://api.openai.com/v1
+PROVIDER_API_KEY=sk-proj-...
+PROVIDER_MODEL=gpt-4o-mini
+MODE=polling                   # polling for local test, webhook for production
+ADMIN_PASSWORD=strong_password # password for /admin dashboard
+DATABASE_URL=postgresql://...  # Optional: Neon or Postgres connection string
+REDIS_URL=redis://...          # Optional: Redis connection string
+```
+
+### 4. Database Setup & Seeding
+```bash
+# Run migrations
+.venv/bin/alembic upgrade head
+
+# Seed initial admin user and default policy
+.venv/bin/python -m app.store.seed
+```
+
+### 5. Running the Application
+```bash
+# Start API and Bot in local polling mode
+.venv/bin/python -m uvicorn app.main:app --port 8000 --reload
+```
+Access the Admin Dashboard at: `http://localhost:8000/admin`
+
+---
+
+## Testing & Quality Assurance
+
+The codebase includes a comprehensive test suite (192+ automated tests) covering all gates, security features, and regression sets.
+
+### Running Pytest
+
+```bash
+# Run the entire test suite with verbose output
+.venv/bin/pytest -v
+
+# Run the entire test suite quickly
+.venv/bin/pytest -q
+
+# Run specific functional test suites:
+# 1. Pipeline & Gates 3-10
+.venv/bin/pytest tests/test_pipeline.py -v
+
+# 2. 40-case Policy Regression Suite
+.venv/bin/pytest tests/test_regression_set.py -v
+
+# 3. Admin API, Auth & Rate Limiting
+.venv/bin/pytest tests/test_admin_api.py -v
+
+# 4. Credential Encryption at Rest (Fernet AES)
+.venv/bin/pytest tests/test_crypto.py -v
+
+# 5. Database Backup CLI & Pruning
+.venv/bin/pytest tests/test_backup.py -v
+
+# 6. Telegram Handlers & /report Command
+.venv/bin/pytest tests/test_handlers.py -v
+
+# 7. Phase 0 Group Membership Gate
+.venv/bin/pytest tests/test_groupgate.py -v
+
+# 8. Rate Limiting & Countdown
+.venv/bin/pytest tests/test_ratelimit.py -v
+```
+
+### Frontend Typecheck & Build Test
+```bash
+cd frontend
+npm run build   # Runs vue-tsc --noEmit && vite build
+```
+
+### Live Environment Connectivity Check
+```bash
+.venv/bin/python scripts/live_check.py
+```
+
+---
+
+## Database Backup & Maintenance (`scripts/backup_db.py`)
+
+Automate backups for Neon Serverless or self-hosted PostgreSQL:
+
+```bash
+# Create a new compressed backup (.sql.gz with SHA-256 metadata)
+.venv/bin/python scripts/backup_db.py --backup
+
+# List all available backups
+.venv/bin/python scripts/backup_db.py --list
+
+# Clean up backups older than 7 days
+.venv/bin/python scripts/backup_db.py --prune --keep-days 7
+
+# Verify integrity of a specific backup file
+.venv/bin/python scripts/backup_db.py --verify data/backups/backup_20260922_085728.sql.gz
+```
+
+---
+
+## Production Deployment (Webhook Mode)
+
+### 1. Docker / Koyeb Deployment
+Build and run using the included `Dockerfile`:
+```bash
+docker build -t opstranslate-bot .
+docker run -p 8000:8000 --env-file .env opstranslate-bot
+```
+
+### 2. Webhook Configuration
+In production (`MODE=webhook`):
+* Set `PUBLIC_URL=https://your-domain.com`
+* Set `WEBHOOK_PATH_SECRET=random_secret_path`
+* Set `WEBHOOK_SECRET=random_header_token`
+* The bot registers its webhook on startup with Telegram and validates the `X-Telegram-Bot-Api-Secret-Token` header.
+
+### 3. Monitoring & Dead-Man's Switch
+Point an external monitoring service (BetterStack / UptimeRobot) at `/healthz`.
+The `/healthz` endpoint verifies:
+* Database connection status.
+* Redis / cache availability.
+* AI provider circuit breaker states.
+* Policy engine load status.
