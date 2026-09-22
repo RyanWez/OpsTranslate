@@ -42,6 +42,8 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 @router.get("/events", dependencies=[Depends(require_admin)])
 async def sse_events(request: Request):
     """Server-Sent Events (SSE) stream for real-time dashboard state synchronization."""
+    if broadcaster._closing:
+        raise HTTPException(status_code=503, detail="Server is shutting down")
     q = broadcaster.subscribe()
     return StreamingResponse(
         sse_event_stream(q, request),

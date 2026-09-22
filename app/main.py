@@ -161,18 +161,35 @@ async def lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001
         log.warning("watchdog_start_failed", exc_info=True)
 
-    # Ensure SSE connections drain instantly on shutdown signals
+    # Ensure SSE connections drain instantly on shutdown signals while preserving Uvicorn's exit handler
     from .admin.sse import broadcaster
 
     import signal
-    loop = asyncio.get_running_loop()
+    orig_handlers = {}
     for sig in (signal.SIGINT, signal.SIGTERM):
         try:
-            loop.add_signal_handler(sig, broadcaster.close)
-        except (NotImplementedError, RuntimeError):
+            orig = signal.getsignal(sig)
+            if callable(orig):
+                orig_handlers[sig] = orig
+
+                def _make_handler(orig_h):
+                    def _wrapped(signum, frame):
+                        broadcaster.close()
+                        orig_h(signum, frame)
+                    return _wrapped
+
+                signal.signal(sig, _make_handler(orig))
+        except (ValueError, AttributeError):
             pass
 
     yield
+
+    # Restore original signal handlers
+    for sig, orig in orig_handlers.items():
+        try:
+            signal.signal(sig, orig)
+        except Exception:
+            pass
 
     broadcaster.close()
 

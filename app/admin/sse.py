@@ -20,6 +20,9 @@ class EventBroadcaster:
 
     def subscribe(self) -> asyncio.Queue:
         q: asyncio.Queue = asyncio.Queue(maxsize=100)
+        if self._closing:
+            q.put_nowait(None)
+            return q
         self._listeners.add(q)
         log.info("SSE client connected, active listeners: %d", len(self._listeners))
         return q
