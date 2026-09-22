@@ -205,6 +205,7 @@ class UserStore:
             username = username.lstrip("@").strip()
 
         now_dt = datetime.datetime.now(datetime.timezone.utc)
+        now_iso = now_dt.isoformat()
         now_str = now_dt.strftime("%Y-%m-%d %H:%M")
         is_admin = user_id in self._seed_admin
         default_role = "admin" if is_admin else "staff"
@@ -221,11 +222,11 @@ class UserStore:
                 "daily_soft_cap": default_cap,
                 "active": True if (auto_allow or is_admin) else False,
                 "created_at": now_str,
-                "last_active_at": now_str,
+                "last_active_at": now_iso,
             }
         else:
             rec = self._discovered_users[user_id]
-            rec["last_active_at"] = now_str
+            rec["last_active_at"] = now_iso
             if username:
                 rec["username"] = username
             if full_name:

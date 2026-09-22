@@ -52,10 +52,14 @@ const formData = ref<UserPayload>({
 
 function formatRelativeTime(dateStr?: string | null): string {
   if (!dateStr) return 'Never'
-  const date = new Date(dateStr)
+  let normalized = dateStr
+  if (!dateStr.endsWith('Z') && !dateStr.includes('+') && !dateStr.includes('T')) {
+    normalized = dateStr.replace(' ', 'T') + 'Z'
+  }
+  const date = new Date(normalized)
   if (isNaN(date.getTime())) return 'Never'
   const now = new Date()
-  const diffSec = Math.floor((now.getTime() - date.getTime()) / 1000)
+  const diffSec = Math.max(0, Math.floor((now.getTime() - date.getTime()) / 1000))
   if (diffSec < 60) return 'Just now'
   if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m ago`
   if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h ago`
