@@ -6,14 +6,36 @@ import type { StaffUser, UserPayload } from '../types'
 export const useUsersStore = defineStore('users', () => {
   const users = ref<StaffUser[]>([])
   const loading = ref<boolean>(false)
+  let liveSyncTimer: any = null
 
-  async function fetchUsers(): Promise<void> {
-    loading.value = true
+  async function fetchUsers(silent = false): Promise<void> {
+    if (!silent) {
+      loading.value = true
+    }
     try {
       const res = await api.getUsers()
       users.value = res.data.users || []
     } finally {
-      loading.value = false
+      if (!silent) {
+        loading.value = false
+      }
+    }
+  }
+
+  function startLiveSync(intervalMs = 4000): void {
+    stopLiveSync()
+    fetchUsers()
+    liveSyncTimer = setInterval(() => {
+      if (document.visibilityState !== 'hidden') {
+        fetchUsers(true)
+      }
+    }, intervalMs)
+  }
+
+  function stopLiveSync(): void {
+    if (liveSyncTimer) {
+      clearInterval(liveSyncTimer)
+      liveSyncTimer = null
     }
   }
 
@@ -43,6 +65,8 @@ export const useUsersStore = defineStore('users', () => {
     users,
     loading,
     fetchUsers,
+    startLiveSync,
+    stopLiveSync,
     saveUser,
     deleteUser,
   }

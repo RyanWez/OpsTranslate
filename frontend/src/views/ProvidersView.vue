@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, h } from 'vue'
+import { ref, onMounted, onUnmounted, h } from 'vue'
 import { useProvidersStore } from '../stores/providers'
 import {
   NCard,
@@ -31,7 +31,11 @@ const message = useMessage()
 const dialog = useDialog()
 
 onMounted(() => {
-  providersStore.fetchProviders()
+  providersStore.startLiveSync(3000)
+})
+
+onUnmounted(() => {
+  providersStore.stopLiveSync()
 })
 
 // Modal Add/Edit State
@@ -336,7 +340,7 @@ const columns = [
         <p class="text-xs text-gray-400 mt-0.5">Manage upstream LLMs, fallback priority order, timeout budgets, and live health pings.</p>
       </div>
       <div class="flex items-center space-x-3">
-        <NButton secondary size="small" @click="providersStore.fetchProviders" :loading="providersStore.loading">
+        <NButton secondary size="small" @click="() => providersStore.fetchProviders()" :loading="providersStore.loading">
           <template #icon>
             <RefreshOutline />
           </template>

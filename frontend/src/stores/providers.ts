@@ -8,14 +8,36 @@ export const useProvidersStore = defineStore('providers', () => {
   const loading = ref<boolean>(false)
   const testing = ref<boolean>(false)
   const testResult = ref<TestProviderResult | null>(null)
+  let liveSyncTimer: any = null
 
-  async function fetchProviders(): Promise<void> {
-    loading.value = true
+  async function fetchProviders(silent = false): Promise<void> {
+    if (!silent) {
+      loading.value = true
+    }
     try {
       const res = await api.getProviders()
       providers.value = res.data.providers || []
     } finally {
-      loading.value = false
+      if (!silent) {
+        loading.value = false
+      }
+    }
+  }
+
+  function startLiveSync(intervalMs = 3000): void {
+    stopLiveSync()
+    fetchProviders()
+    liveSyncTimer = setInterval(() => {
+      if (document.visibilityState !== 'hidden') {
+        fetchProviders(true)
+      }
+    }, intervalMs)
+  }
+
+  function stopLiveSync(): void {
+    if (liveSyncTimer) {
+      clearInterval(liveSyncTimer)
+      liveSyncTimer = null
     }
   }
 
@@ -79,6 +101,8 @@ export const useProvidersStore = defineStore('providers', () => {
     testing,
     testResult,
     fetchProviders,
+    startLiveSync,
+    stopLiveSync,
     saveProvider,
     deleteProvider,
     testProviderConnection,

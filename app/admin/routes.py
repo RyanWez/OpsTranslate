@@ -129,6 +129,8 @@ async def get_overview(request: Request):
     except Exception:
         pass
 
+    telemetry = services.stats.get_telemetry()
+
     return {
         "status": "ok",
         "mode": config.MODE,
@@ -143,6 +145,7 @@ async def get_overview(request: Request):
         "active_provider_count": len(services.router.providers),
         "today_spend_usd": round(today_spend, 4),
         "server_time": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "telemetry": telemetry,
     }
 
 

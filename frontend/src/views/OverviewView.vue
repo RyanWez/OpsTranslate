@@ -16,7 +16,7 @@ import {
 const overviewStore = useOverviewStore()
 
 onMounted(() => {
-  overviewStore.startAutoRefresh(15000)
+  overviewStore.startAutoRefresh(3000)
 })
 
 onUnmounted(() => {
@@ -33,6 +33,89 @@ const circuitCount = computed(() => {
   const tripped = total - healthy
   return { total, healthy, tripped }
 })
+
+const telemetry = computed(() => stats.value?.telemetry)
+const currentThroughput = computed(() => telemetry.value?.current_throughput_5m ?? 0)
+const currentP95 = computed(() => telemetry.value?.current_p95_ms ?? 0)
+
+const points = computed(() => {
+  return telemetry.value?.points ?? [
+    { label: '00:00', throughput: 0, latency_ms: 0 },
+    { label: '04:00', throughput: 0, latency_ms: 0 },
+    { label: '08:00', throughput: 0, latency_ms: 0 },
+    { label: '12:00', throughput: 0, latency_ms: 0 },
+    { label: '16:00', throughput: 0, latency_ms: 0 },
+    { label: '20:00', throughput: 0, latency_ms: 0 },
+    { label: 'Live (Now)', throughput: 0, latency_ms: 0 },
+  ]
+})
+
+const chartPoints = computed(() => {
+  const pts = points.value
+  const n = pts.length
+  if (n === 0) return []
+
+  const maxT = Math.max(5, ...pts.map((p) => p.throughput))
+  const maxL = Math.max(500, ...pts.map((p) => p.latency_ms))
+
+  return pts.map((p, idx) => {
+    const x = Math.round((idx / (n - 1)) * 800)
+    const yT = Math.round(145 - (p.throughput / maxT) * 115)
+    const yL = Math.round(145 - (p.latency_ms / maxL) * 115)
+    return {
+      x,
+      yT,
+      yL,
+      label: p.label,
+      throughput: p.throughput,
+      latency_ms: p.latency_ms,
+    }
+  })
+})
+
+const throughputPath = computed(() => {
+  const pts = chartPoints.value
+  if (pts.length < 2) return ''
+  let d = `M${pts[0].x},${pts[0].yT}`
+  for (let i = 1; i < pts.length; i++) {
+    const prev = pts[i - 1]
+    const cur = pts[i]
+    const cx1 = prev.x + (cur.x - prev.x) / 2
+    const cy1 = prev.yT
+    const cx2 = prev.x + (cur.x - prev.x) / 2
+    const cy2 = cur.yT
+    d += ` C${cx1},${cy1} ${cx2},${cy2} ${cur.x},${cur.yT}`
+  }
+  return d
+})
+
+const throughputArea = computed(() => {
+  const path = throughputPath.value
+  if (!path) return ''
+  return `${path} L800,150 L0,150 Z`
+})
+
+const latencyPath = computed(() => {
+  const pts = chartPoints.value
+  if (pts.length < 2) return ''
+  let d = `M${pts[0].x},${pts[0].yL}`
+  for (let i = 1; i < pts.length; i++) {
+    const prev = pts[i - 1]
+    const cur = pts[i]
+    const cx1 = prev.x + (cur.x - prev.x) / 2
+    const cy1 = prev.yL
+    const cx2 = prev.x + (cur.x - prev.x) / 2
+    const cy2 = cur.yL
+    d += ` C${cx1},${cy1} ${cx2},${cy2} ${cur.x},${cur.yL}`
+  }
+  return d
+})
+
+const latencyArea = computed(() => {
+  const path = latencyPath.value
+  if (!path) return ''
+  return `${path} L800,150 L0,150 Z`
+})
 </script>
 
 <template>
@@ -44,7 +127,7 @@ const circuitCount = computed(() => {
         <p class="text-xs text-gray-400 mt-0.5">Real-time health telemetry, circuit breaker states, and gateway statistics.</p>
       </div>
       <div class="flex items-center space-x-3">
-        <NButton secondary size="small" @click="overviewStore.fetchOverview" :loading="overviewStore.loading">
+        <NButton secondary size="small" @click="() => overviewStore.fetchOverview()" :loading="overviewStore.loading">
           <template #icon>
             <RefreshOutline />
           </template>
@@ -162,16 +245,18 @@ const circuitCount = computed(() => {
               <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
               <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
             </span>
-            <span class="text-[11px] text-emerald-400 font-mono">Live</span>
+            <span class="text-[11px] text-emerald-400 font-mono">Live (3s sync)</span>
           </div>
           <div class="flex items-center space-x-4 text-xs">
             <div class="flex items-center space-x-1.5">
               <span class="w-2.5 h-2.5 rounded-full bg-cyan-400"></span>
-              <span class="text-gray-400">Request Throughput</span>
+              <span class="text-gray-400">Request Throughput:</span>
+              <span class="text-cyan-400 font-mono font-semibold">{{ currentThroughput }} in 5m</span>
             </div>
             <div class="flex items-center space-x-1.5">
               <span class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
-              <span class="text-gray-400">P95 Latency</span>
+              <span class="text-gray-400">P95 Latency:</span>
+              <span class="text-emerald-400 font-mono font-semibold">{{ currentP95 }} ms</span>
             </div>
           </div>
         </div>
@@ -196,11 +281,13 @@ const circuitCount = computed(() => {
 
             <!-- Cyan Throughput Area & Line -->
             <path
-              d="M0,130 C120,120 180,60 260,85 C340,110 400,30 480,45 C560,60 640,115 720,70 C760,50 780,40 800,45 L800,150 L0,150 Z"
+              v-if="throughputArea"
+              :d="throughputArea"
               fill="url(#grad-cyan)"
             />
             <path
-              d="M0,130 C120,120 180,60 260,85 C340,110 400,30 480,45 C560,60 640,115 720,70 C760,50 780,40 800,45"
+              v-if="throughputPath"
+              :d="throughputPath"
               fill="none"
               stroke="#06b6d4"
               stroke-width="2.5"
@@ -208,30 +295,50 @@ const circuitCount = computed(() => {
 
             <!-- Emerald Latency Area & Line -->
             <path
-              d="M0,140 C140,135 220,105 300,115 C400,125 480,95 580,100 C680,105 740,80 800,85 L800,150 L0,150 Z"
+              v-if="latencyArea"
+              :d="latencyArea"
               fill="url(#grad-emerald)"
             />
             <path
-              d="M0,140 C140,135 220,105 300,115 C400,125 480,95 580,100 C680,105 740,80 800,85"
+              v-if="latencyPath"
+              :d="latencyPath"
               fill="none"
               stroke="#10b981"
               stroke-width="2"
             />
 
-            <!-- Highlight Pulse Point -->
-            <circle cx="480" cy="45" r="5" fill="#06b6d4" class="animate-pulse" />
-            <circle cx="480" cy="45" r="9" fill="none" stroke="#06b6d4" stroke-opacity="0.5" />
+            <!-- Interactive Data Points -->
+            <g v-for="pt in chartPoints" :key="pt.label">
+              <circle
+                :cx="pt.x"
+                :cy="pt.yT"
+                r="4.5"
+                fill="#06b6d4"
+                class="hover:r-6 cursor-pointer transition-all"
+              >
+                <title>{{ pt.label }}: {{ pt.throughput }} requests</title>
+              </circle>
+              <circle
+                :cx="pt.x"
+                :cy="pt.yL"
+                r="3.5"
+                fill="#10b981"
+                class="hover:r-5 cursor-pointer transition-all"
+              >
+                <title>{{ pt.label }}: {{ pt.latency_ms }} ms latency</title>
+              </circle>
+            </g>
           </svg>
         </div>
 
         <div class="flex justify-between text-[11px] font-mono text-gray-500 mt-2 border-t border-gray-800/60 pt-2">
-          <span>00:00</span>
-          <span>04:00</span>
-          <span>08:00</span>
-          <span>12:00</span>
-          <span>16:00</span>
-          <span>20:00</span>
-          <span class="text-cyan-400 font-semibold">Live (Now)</span>
+          <span
+            v-for="pt in chartPoints"
+            :key="pt.label"
+            :class="pt.label.includes('Live') ? 'text-cyan-400 font-semibold' : ''"
+          >
+            {{ pt.label }}
+          </span>
         </div>
       </NCard>
 

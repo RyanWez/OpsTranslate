@@ -4,6 +4,20 @@ export interface MeResponse {
   mode: string
 }
 
+export interface TelemetryPoint {
+  label: string
+  throughput: number
+  latency_ms: number
+}
+
+export interface TelemetryData {
+  current_throughput_5m: number
+  current_p95_ms: number
+  total_ok: number
+  total_failed: number
+  points: TelemetryPoint[]
+}
+
 export interface OverviewStats {
   status: string
   mode: string
@@ -18,6 +32,7 @@ export interface OverviewStats {
   active_provider_count: number
   today_spend_usd: number
   server_time: string
+  telemetry?: TelemetryData
 }
 
 export interface ProviderItem {

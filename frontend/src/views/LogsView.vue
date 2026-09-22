@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, h } from 'vue'
+import { ref, onMounted, onUnmounted, computed, h } from 'vue'
 import { useRouter } from 'vue-router'
 import { useLogsStore } from '../stores/logs'
 import { usePlaygroundStore } from '../stores/playground'
@@ -26,7 +26,11 @@ const logsStore = useLogsStore()
 const playgroundStore = usePlaygroundStore()
 
 onMounted(() => {
-  logsStore.fetchLogs()
+  logsStore.startLiveSync(3000)
+})
+
+onUnmounted(() => {
+  logsStore.stopLiveSync()
 })
 
 const searchQuery = ref('')
@@ -247,7 +251,7 @@ const columns = [
             @update:value="handleLimitChange"
           />
         </div>
-        <NButton secondary size="small" @click="logsStore.fetchLogs" :loading="logsStore.loading">
+        <NButton secondary size="small" @click="() => logsStore.fetchLogs()" :loading="logsStore.loading">
           <template #icon>
             <RefreshOutline />
           </template>

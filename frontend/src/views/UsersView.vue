@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, h } from 'vue'
+import { ref, onMounted, onUnmounted, h } from 'vue'
 import { useUsersStore } from '../stores/users'
 import {
   NCard,
@@ -24,7 +24,11 @@ const message = useMessage()
 const dialog = useDialog()
 
 onMounted(() => {
-  usersStore.fetchUsers()
+  usersStore.startLiveSync(4000)
+})
+
+onUnmounted(() => {
+  usersStore.stopLiveSync()
 })
 
 const showModal = ref(false)
@@ -206,7 +210,7 @@ const columns = [
         <p class="text-xs text-gray-400 mt-0.5">Allowlist Telegram user IDs, manage roles, and enforce daily soft quota caps.</p>
       </div>
       <div class="flex items-center space-x-3">
-        <NButton secondary size="small" @click="usersStore.fetchUsers" :loading="usersStore.loading">
+        <NButton secondary size="small" @click="() => usersStore.fetchUsers()" :loading="usersStore.loading">
           <template #icon>
             <RefreshOutline />
           </template>

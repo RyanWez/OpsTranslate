@@ -9,23 +9,33 @@ export const useOverviewStore = defineStore('overview', () => {
   const error = ref<string | null>(null)
   let timer: any = null
 
-  async function fetchOverview(): Promise<void> {
-    loading.value = true
+  async function fetchOverview(silent = false): Promise<void> {
+    if (!silent) {
+      loading.value = true
+    }
     error.value = null
     try {
       const res = await api.getOverview()
       stats.value = res.data
     } catch (err: any) {
-      error.value = err.message || 'Failed to load system overview'
+      if (!silent) {
+        error.value = err.message || 'Failed to load system overview'
+      }
     } finally {
-      loading.value = false
+      if (!silent) {
+        loading.value = false
+      }
     }
   }
 
-  function startAutoRefresh(intervalMs = 15000): void {
+  function startAutoRefresh(intervalMs = 3000): void {
     stopAutoRefresh()
     fetchOverview()
-    timer = setInterval(fetchOverview, intervalMs)
+    timer = setInterval(() => {
+      if (document.visibilityState !== 'hidden') {
+        fetchOverview(true)
+      }
+    }, intervalMs)
   }
 
   function stopAutoRefresh(): void {

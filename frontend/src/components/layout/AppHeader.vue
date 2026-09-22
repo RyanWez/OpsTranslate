@@ -2,11 +2,15 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useAuthStore } from '../../stores/auth'
 import { useOverviewStore } from '../../stores/overview'
+import { useProvidersStore } from '../../stores/providers'
+import { useLogsStore } from '../../stores/logs'
 import { NButton, NTag } from 'naive-ui'
 import { RefreshOutline, LogOutOutline } from '@vicons/ionicons5'
 
 const authStore = useAuthStore()
 const overviewStore = useOverviewStore()
+const providersStore = useProvidersStore()
+const logsStore = useLogsStore()
 
 const serverClock = ref<string>('')
 let timer: any = null
@@ -30,6 +34,8 @@ onUnmounted(() => {
 
 function handleRefresh() {
   overviewStore.fetchOverview()
+  providersStore.fetchProviders()
+  logsStore.fetchLogs()
 }
 
 function handleLogout() {
@@ -58,13 +64,16 @@ function handleLogout() {
 
       <div class="h-4 w-[1px] bg-gray-700 hidden md:block"></div>
 
-      <!-- Live Heartbeat status pill -->
-      <div class="hidden sm:flex items-center space-x-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20">
+      <!-- Live Heartbeat & Sync status pill -->
+      <div
+        class="hidden sm:flex items-center space-x-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20"
+        title="Real-time live sync enabled (3s auto-update across all devices)"
+      >
         <span class="relative flex h-2 w-2">
           <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
           <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
         </span>
-        <span class="text-xs font-medium text-emerald-400">System Operational</span>
+        <span class="text-xs font-medium text-emerald-400">Live Sync (3s)</span>
       </div>
     </div>
 

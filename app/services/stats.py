@@ -57,6 +57,7 @@ class Stats:
 
     def record_usage_log(self, fields: dict) -> None:
         self._log_counter += 1
+        now_ts = fields.get("timestamp") or time.time()
         raw_status = fields.get("status", 200)
         norm_status = 200 if raw_status == "ok" else raw_status
         prov = fields.get("provider") or fields.get("provider_name")
@@ -65,6 +66,7 @@ class Stats:
 
         log_entry = {
             "id": fields.get("id") or self._log_counter,
+            "timestamp": now_ts,
             "user_id": fields.get("user_id", 0),
             "char_len": fields.get("char_len", 0),
             "provider": prov,
@@ -151,3 +153,69 @@ class Stats:
         if not total:
             return 0.0
         return len(self._recent_policy_errors) / total
+
+    def get_telemetry(self) -> dict:
+        """Calculate dynamic telemetry points and current throughput/latency metrics."""
+        import datetime
+        from zoneinfo import ZoneInfo
+
+        now = time.time()
+        slot_hours = [0, 4, 8, 12, 16, 20, 24]
+        labels = ["00:00", "04:00", "08:00", "12:00", "16:00", "20:00", "Live (Now)"]
+
+        try:
+            tz = ZoneInfo("Asia/Yangon")
+            dt = datetime.datetime.now(tz)
+            today_prefix = dt.strftime("%Y-%m-%d")
+        except Exception:
+            today_prefix = ""
+
+        points = []
+        for i, label in enumerate(labels):
+            if label == "Live (Now)":
+                # Last 15 minutes window
+                window_logs = [
+                    l for l in self.recent_logs
+                    if l.get("timestamp") and (now - l["timestamp"] < 900)
+                ]
+            else:
+                h_start = slot_hours[i]
+                h_end = slot_hours[i + 1] if i + 1 < len(slot_hours) else 24
+                window_logs = []
+                for l in self.recent_logs:
+                    ca = l.get("created_at", "")
+                    if today_prefix and not ca.startswith(today_prefix):
+                        continue
+                    if len(ca) >= 13:
+                        try:
+                            hh = int(ca[11:13])
+                            if h_start <= hh < h_end:
+                                window_logs.append(l)
+                        except Exception:
+                            pass
+
+            count = len(window_logs)
+            if window_logs:
+                lats = [l.get("latency_ms", 0) for l in window_logs]
+                lats.sort()
+                p95_val = lats[min(len(lats) - 1, int(len(lats) * 0.95))]
+            else:
+                p95_val = 0
+
+            points.append({
+                "label": label,
+                "throughput": count,
+                "latency_ms": round(p95_val),
+            })
+
+        p95_5m = self.p95_5m()
+        overall_p95 = p95_5m if p95_5m > 0 else self.p95_latency()
+
+        return {
+            "current_throughput_5m": self.count_5m(),
+            "current_p95_ms": round(overall_p95 * 1000) if overall_p95 > 0 else 0,
+            "total_ok": self.translations_ok,
+            "total_failed": self.translations_failed,
+            "points": points,
+        }
+
