@@ -28,7 +28,7 @@ COPY --from=frontend-builder /build/app/static/admin ./app/static/admin
 COPY alembic/ ./alembic/
 COPY alembic.ini .
 
-RUN chown -R appuser:appuser /srv/app
+RUN mkdir -p /srv/app/data && chown -R appuser:appuser /srv/app
 USER appuser
 
 EXPOSE 8000
