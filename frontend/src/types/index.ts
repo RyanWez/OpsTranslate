@@ -107,7 +107,7 @@ export interface UsageLogItem {
   latency_ms: number
   status: number | string
   policy_hits: string[]
-
+  timestamp?: number
   created_at: string | null
 }
 

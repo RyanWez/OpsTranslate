@@ -7,6 +7,8 @@ export const useLogsStore = defineStore('logs', () => {
   const logs = ref<UsageLogItem[]>([])
   const loading = ref<boolean>(false)
   const limit = ref<number>(100)
+  const dateRange = ref<[number, number] | null>(null)
+  const selectedProvider = ref<string | null>(null)
   let liveSyncTimer: any = null
 
   async function fetchLogs(silent = false): Promise<void> {
@@ -14,7 +16,15 @@ export const useLogsStore = defineStore('logs', () => {
       loading.value = true
     }
     try {
-      const res = await api.getLogs(limit.value)
+      const params: Record<string, any> = { limit: limit.value }
+      if (dateRange.value && dateRange.value.length === 2) {
+        params.start_time = dateRange.value[0]
+        params.end_time = dateRange.value[1]
+      }
+      if (selectedProvider.value && selectedProvider.value !== 'all') {
+        params.provider = selectedProvider.value
+      }
+      const res = await api.getLogs(params)
       logs.value = res.data.logs || []
     } finally {
       if (!silent) {
@@ -53,6 +63,8 @@ export const useLogsStore = defineStore('logs', () => {
     logs,
     loading,
     limit,
+    dateRange,
+    selectedProvider,
     fetchLogs,
     addLiveLog,
     startLiveSync,

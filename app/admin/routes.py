@@ -690,9 +690,42 @@ async def test_playground(req: PlaygroundRequest, request: Request):
 
 # ---- Audit Logs -----------------------------------------------------------
 
+def _parse_ts_param(val: Optional[str]) -> Optional[float]:
+    """Parse timestamp string (epoch seconds, milliseconds, or ISO/date string) to float seconds."""
+    if not val:
+        return None
+    val = str(val).strip()
+    try:
+        if val.replace(".", "", 1).isdigit():
+            num = float(val)
+            if num > 1e11:  # JavaScript timestamp in milliseconds
+                return num / 1000.0
+            return num
+    except Exception:
+        pass
+    from datetime import datetime, timezone
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(val[:19], fmt).replace(tzinfo=timezone.utc).timestamp()
+        except Exception:
+            pass
+    try:
+        return datetime.fromisoformat(val).timestamp()
+    except Exception:
+        return None
+
+
 @router.get("/logs", dependencies=[Depends(require_admin)])
-async def get_logs(request: Request, limit: int = 50):
+async def get_logs(
+    request: Request,
+    limit: int = 100,
+    start_time: Optional[str] = None,
+    end_time: Optional[str] = None,
+    provider: Optional[str] = None,
+):
     services: Services = request.app.state.services
+    start_ts = _parse_ts_param(start_time)
+    end_ts = _parse_ts_param(end_time)
 
     def _format_log(raw: dict) -> dict:
         st = raw.get("status", 200)
@@ -711,16 +744,43 @@ async def get_logs(request: Request, limit: int = 50):
             "created_at": raw.get("created_at"),
         }
 
+    def _filter_in_memory(items: list[dict]) -> list[dict]:
+        out = []
+        for raw in items:
+            raw_ts = raw.get("timestamp")
+            if raw_ts is None and raw.get("created_at"):
+                raw_ts = _parse_ts_param(raw.get("created_at"))
+            if start_ts is not None and raw_ts is not None and raw_ts < start_ts:
+                continue
+            if end_ts is not None and raw_ts is not None and raw_ts > end_ts:
+                continue
+            if provider and provider != "all":
+                item_prov = (raw.get("provider") or "").lower()
+                if item_prov != provider.lower():
+                    continue
+            out.append(_format_log(raw))
+            if len(out) >= limit:
+                break
+        return out
+
     if not dbmod.is_configured():
-        return {"logs": [_format_log(l) for l in list(services.stats.recent_logs)[:limit]]}
+        return {"logs": _filter_in_memory(list(services.stats.recent_logs))}
     
     try:
+        from datetime import datetime, timezone
         from sqlalchemy import select
 
         async with dbmod.session() as sess:
-            result = await sess.execute(
-                select(UsageLog).order_by(UsageLog.ts.desc()).limit(limit)
-            )
+            query = select(UsageLog).order_by(UsageLog.ts.desc())
+            if start_ts is not None:
+                query = query.where(UsageLog.ts >= datetime.fromtimestamp(start_ts, tz=timezone.utc))
+            if end_ts is not None:
+                query = query.where(UsageLog.ts <= datetime.fromtimestamp(end_ts, tz=timezone.utc))
+            if provider and provider != "all":
+                query = query.where(UsageLog.provider == provider)
+
+            query = query.limit(limit)
+            result = await sess.execute(query)
             rows = result.scalars().all()
             logs = []
             for r in rows:
@@ -736,8 +796,8 @@ async def get_logs(request: Request, limit: int = 50):
                 })
             if logs:
                 return {"logs": logs}
-            return {"logs": [_format_log(l) for l in list(services.stats.recent_logs)[:limit]]}
+            return {"logs": _filter_in_memory(list(services.stats.recent_logs))}
     except Exception:
-        return {"logs": [_format_log(l) for l in list(services.stats.recent_logs)[:limit]]}
+        return {"logs": _filter_in_memory(list(services.stats.recent_logs))}
 
 

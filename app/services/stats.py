@@ -26,7 +26,7 @@ class Stats:
         self._recent_latencies: deque[tuple[float, float]] = deque(maxlen=500)  # (ts, latency)
         self.policy_engine_errors: int = 0
         self._recent_policy_errors: deque[float] = deque(maxlen=500)
-        self.recent_logs: deque[dict] = deque(maxlen=200)
+        self.recent_logs: deque[dict] = deque(maxlen=1000)
         self._log_counter: int = 0
         self._seed_initial_logs()
 

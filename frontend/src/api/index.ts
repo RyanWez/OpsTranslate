@@ -43,5 +43,10 @@ export const api = {
     apiClient.post<PlaygroundResult>('/playground', { text, dst }),
 
   // Logs
-  getLogs: (limit: number = 50) => apiClient.get<{ logs: UsageLogItem[] }>(`/logs?limit=${limit}`),
+  getLogs: (params?: number | { limit?: number; start_time?: number | string; end_time?: number | string; provider?: string }) => {
+    if (typeof params === 'number') {
+      return apiClient.get<{ logs: UsageLogItem[] }>(`/logs?limit=${params}`)
+    }
+    return apiClient.get<{ logs: UsageLogItem[] }>('/logs', { params })
+  },
 }

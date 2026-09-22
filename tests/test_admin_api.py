@@ -216,4 +216,23 @@ def test_admin_provider_toggle_and_anthropic_test(client, auth_headers):
     client.delete("/api/admin/providers/claude-test-provider", headers=auth_headers)
 
 
+def test_admin_logs_date_range_filtering(client, auth_headers):
+    # Query with future date range (should return 0 logs)
+    res = client.get("/api/admin/logs?start_time=2099-01-01&end_time=2099-01-02", headers=auth_headers)
+    assert res.status_code == 200
+    assert len(res.json()["logs"]) == 0
+
+    # Query with wide range (should return logs)
+    res = client.get("/api/admin/logs?start_time=2020-01-01&end_time=2099-01-01", headers=auth_headers)
+    assert res.status_code == 200
+    assert len(res.json()["logs"]) > 0
+
+    # Query with provider filter
+    res = client.get("/api/admin/logs?provider=gemini", headers=auth_headers)
+    assert res.status_code == 200
+    for l in res.json()["logs"]:
+        assert l["provider"].lower() == "gemini"
+
+
+
 
