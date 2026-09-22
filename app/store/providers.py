@@ -83,7 +83,27 @@ async def get_active_service_providers() -> list[ServiceProvider]:
                     )
                     return result.scalars().all()
 
-            db_rows = await asyncio.wait_for(_fetch(), timeout=2.0)
+            db_rows = await asyncio.wait_for(_fetch(), timeout=10.0)
+            if not db_rows:
+                stored = load_stored_providers()
+                if stored:
+                    async with dbmod.session() as sess:
+                        for d in stored:
+                            p = DBProvider(
+                                name=d["name"],
+                                kind="openai_compatible",
+                                base_url=d["base_url"].rstrip("/"),
+                                model=d["model"],
+                                priority=int(d.get("priority", 1)),
+                                enabled=bool(d.get("enabled", True)),
+                                timeout_ms=int(float(d.get("timeout_s", config.PROVIDER_TIMEOUT_S)) * 1000),
+                            )
+                            if d.get("api_key"):
+                                p.api_key = d["api_key"]
+                            sess.add(p)
+                        await sess.commit()
+                    db_rows = await asyncio.wait_for(_fetch(), timeout=10.0)
+
             if db_rows:
                 providers = []
                 for row in db_rows:

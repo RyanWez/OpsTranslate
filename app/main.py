@@ -16,6 +16,7 @@ closed, recent successful traffic OR outside working hours) and returns
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -128,20 +129,42 @@ async def lifespan(app: FastAPI):
         log.warning("initial_provider_sync_failed", exc_info=True)
 
     polling_task = None
+    shutdown_event = asyncio.Event()
     if config.MODE == "polling":
-        import asyncio
-
         async def _poll():
-            log.info("starting polling mode")
-            try:
-                await dp.start_polling(
-                    bot,
-                    allowed_updates=ALLOWED_UPDATES,
-                    handle_signals=False,
-                    drop_pending_updates=True,
-                )
-            except Exception:
-                log.exception("Polling encountered an error and stopped")
+            log.info("starting polling mode with auto-reconnect")
+            backoff = 2
+            first_run = True
+            while not shutdown_event.is_set():
+                try:
+                    await dp.start_polling(
+                        bot,
+                        allowed_updates=ALLOWED_UPDATES,
+                        handle_signals=False,
+                        drop_pending_updates=first_run,
+                    )
+                    first_run = False
+                    if shutdown_event.is_set():
+                        break
+                    # If start_polling returned without error and not shutting down, short sleep before reconnecting
+                    await asyncio.sleep(1)
+                except asyncio.CancelledError:
+                    break
+                except Exception as exc:
+                    if shutdown_event.is_set():
+                        break
+                    first_run = False
+                    log.warning(
+                        "Polling encountered an error (%s: %s). Reconnecting in %ss...",
+                        type(exc).__name__,
+                        exc,
+                        backoff,
+                    )
+                    try:
+                        await asyncio.sleep(backoff)
+                    except asyncio.CancelledError:
+                        break
+                    backoff = min(backoff * 2, 30)
 
         polling_task = asyncio.create_task(_poll())
     elif config.MODE == "webhook":
@@ -159,8 +182,6 @@ async def lifespan(app: FastAPI):
     # Watchdog for error rate / p95 / digest (P1.3)
     watchdog_task = None
     try:
-        import asyncio
-
         from .services.watchdog import watchdog_loop
 
         watchdog_task = asyncio.create_task(watchdog_loop(services))
@@ -202,11 +223,10 @@ async def lifespan(app: FastAPI):
     if watchdog_task is not None:
         watchdog_task.cancel()
         try:
-            import asyncio
-
             await watchdog_task
         except asyncio.CancelledError:
             pass
+    shutdown_event.set()
     if polling_task is not None:
         try:
             await dp.stop_polling()
@@ -214,8 +234,6 @@ async def lifespan(app: FastAPI):
             pass
         polling_task.cancel()
         try:
-            import asyncio
-
             await polling_task
         except asyncio.CancelledError:
             pass

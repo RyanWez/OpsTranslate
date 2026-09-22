@@ -423,6 +423,8 @@ async def log_usage(services: Services, **fields) -> None:
         return
     try:
         db_fields = {k: v for k, v in fields.items() if k not in ("display_name", "username")}
+        if "status" in db_fields and db_fields["status"] is not None:
+            db_fields["status"] = str(db_fields["status"])
         async with dbmod.session() as sess:
             sess.add(UsageLog(**db_fields))
             await sess.commit()
@@ -561,7 +563,7 @@ async def run_translation(
                 services, user_id=user_id, src_lang=src, dst_lang=dst,
                 text_hash=_text_hash(raw_text), char_len=len(raw_text),
                 provider="cache", cache_hit=True, latency_ms=int((time.monotonic() - t0) * 1000),
-                policy_version=services.policy.version, status=200,
+                policy_version=services.policy.version, status="200",
             )
             return
 
@@ -686,7 +688,7 @@ async def run_translation(
             latency_ms=int((time.monotonic() - t0) * 1000),
             policy_version=services.policy.version,
             policy_hits=meta.get("policy_hits") or [], deny_hits=meta.get("deny_hits"),
-            ratio=meta.get("ratio"), status=200,
+            ratio=meta.get("ratio"), status="200",
         )
     finally:
         await services.cache.clear_inflight(dup)

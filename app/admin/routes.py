@@ -828,6 +828,12 @@ async def toggle_user_status(user_id: int, payload: UserStatusPayload, request: 
         services.user_store._discovered_users[user_id]["active"] = payload.active
 
     services.user_store.invalidate(user_id)
+    try:
+        group_id = config.GROUP_CHAT_ID
+        if group_id:
+            await services.cache.delete(f"grp:{group_id}:{user_id}")
+    except Exception:
+        pass
     broadcaster.broadcast("users_changed", {"action": "status_toggle", "user_id": user_id, "active": payload.active})
     return {"ok": True, "user_id": user_id, "active": payload.active}
 
@@ -849,6 +855,12 @@ async def delete_user(user_id: int, request: Request):
         services.user_store._discovered_users.pop(user_id, None)
 
     services.user_store.invalidate(user_id)
+    try:
+        group_id = config.GROUP_CHAT_ID
+        if group_id:
+            await services.cache.delete(f"grp:{group_id}:{user_id}")
+    except Exception:
+        pass
     broadcaster.broadcast("users_changed", {"action": "delete", "user_id": user_id})
     return {"ok": True, "message": "User deleted."}
 

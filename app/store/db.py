@@ -45,12 +45,16 @@ def get_engine():
         new_query = urllib.parse.urlencode({k: v[0] for k, v in query_params.items()})
         cleaned_url = urllib.parse.urlunparse(parsed._replace(query=new_query))
 
-        connect_args["timeout"] = 2.0
+        from sqlalchemy.pool import NullPool
+
+        connect_args["timeout"] = 25.0
+        connect_args["statement_cache_size"] = 0
+        connect_args["prepared_statement_cache_size"] = 0
+        connect_args["prepared_statement_name_func"] = lambda: False
         _engine = create_async_engine(
             cleaned_url,
+            poolclass=NullPool,
             connect_args=connect_args,
-            pool_pre_ping=True,
-            pool_recycle=300,
         )
     return _engine
 

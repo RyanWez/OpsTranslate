@@ -106,7 +106,9 @@ async def is_group_member(
 
     # Admin override first: static staff/admin survive a group kick so the
     # owner is never locked out by a membership mistake.
-    allowed, _ = await store.is_allowed(user_id)
+    allowed, role = await store.is_allowed(user_id)
+    if role == "suspended":
+        return False, "suspended"
     if allowed:
         return True, "allowlist"
 

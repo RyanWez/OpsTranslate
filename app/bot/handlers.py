@@ -86,6 +86,12 @@ async def _gate_access(
     )
     if not allowed:
         log.info("access_denied user=%s reason=%s", message.from_user.id, reason)
+        if reason == "suspended":
+            try:
+                await message.answer("⚠️ Your account access has been suspended by an administrator.")
+            except Exception:
+                pass
+        return False
     else:
         try:
             if message.from_user:

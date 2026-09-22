@@ -1,6 +1,6 @@
 """add username and last_active_at columns to allowed_users
 
-Revision ID: 0003_add_username_and_last_active
+Revision ID: 0003_add_user_profile
 Revises: 0002_add_provider_to_usage_log
 Create Date: 2026-09-22
 """
@@ -9,7 +9,7 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0003_add_username_and_last_active"
+revision = "0003_add_user_profile"
 down_revision = "0002_add_provider_to_usage_log"
 branch_labels = None
 depends_on = None

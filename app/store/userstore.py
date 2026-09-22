@@ -90,11 +90,19 @@ class UserStore:
                     self._memo_set(self._allowed_memo, user_id, result)
                     return result
                 elif row is not None and not row.active:
-                    result = (False, "staff")
+                    result = (False, "suspended")
                     self._memo_set(self._allowed_memo, user_id, result)
                     return result
             except Exception as exc:  # noqa: BLE001 - fall through to env seed
                 log.warning("allowlist_lookup_failed: %s", exc)
+
+        # Check in-memory discovered users if suspended
+        if hasattr(self, "_discovered_users") and user_id in self._discovered_users:
+            rec = self._discovered_users[user_id]
+            if not rec.get("active", True):
+                result = (False, "suspended")
+                self._memo_set(self._allowed_memo, user_id, result)
+                return result
 
         # fallback to env seed
         if user_id in self._seed_admin:
