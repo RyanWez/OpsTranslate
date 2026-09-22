@@ -22,7 +22,7 @@ from . import db as dbmod
 
 log = logging.getLogger("opstranslate.users")
 
-_MEMO_TTL_S = 60
+_MEMO_TTL_S = 3600
 
 
 class UserStore:
@@ -31,7 +31,7 @@ class UserStore:
         self._seed_staff = set(config.ALLOWED_USER_IDS)
         self._seed_admin = set(config.ADMIN_USER_IDS)
         self._discovered_users: dict[int, dict] = {}  # in-memory discovered profile registry
-        # 60 s memo caches: user_id -> (value, timestamp)
+        # Memo caches: user_id -> (value, timestamp)
         self._allowed_memo: dict[int, tuple[tuple[bool, str], float]] = {}
         self._target_memo: dict[int, tuple[str, float]] = {}
         self._cap_memo: dict[int, tuple[int, float]] = {}
@@ -112,7 +112,7 @@ class UserStore:
             result = (True, "staff")
         else:
             result = (False, "staff")
-        # Also memoize seed result for 60 s so repeated calls do not
+        # Also memoize seed result so repeated calls do not
         # re-evaluate seed sets (cheap but consistent).
         self._memo_set(self._allowed_memo, user_id, result)
         return result
@@ -122,6 +122,12 @@ class UserStore:
         memo_val = self._memo_get(self._target_memo, user_id)
         if memo_val is not None:
             return memo_val
+
+        # In-memory target map next
+        if user_id in self._targets:
+            target = self._targets[user_id]
+            self._memo_set(self._target_memo, user_id, target)
+            return target
 
         if dbmod.is_configured():
             try:
@@ -149,33 +155,47 @@ class UserStore:
 
     async def set_target(self, user_id: int, lang: str) -> None:
         self._targets[user_id] = lang
-        # Invalidate memo so the next get_target sees the new value.
-        self._target_memo.pop(user_id, None)
         self._memo_set(self._target_memo, user_id, lang)
         if dbmod.is_configured():
+            import asyncio
+
             try:
-                from sqlalchemy import select
+                asyncio.create_task(self._persist_target(user_id, lang))
+            except RuntimeError:
+                pass
 
-                from .models import UserSettings
+    async def _persist_target(self, user_id: int, lang: str) -> None:
+        try:
+            from sqlalchemy import select
 
-                async with dbmod.session() as sess:
-                    row = (
-                        await sess.execute(
-                            select(UserSettings).where(UserSettings.user_id == user_id)
-                        )
-                    ).scalar_one_or_none()
-                    if row is None:
-                        sess.add(UserSettings(user_id=user_id, target_lang=lang))
-                    else:
-                        row.target_lang = lang
-                    await sess.commit()
-            except Exception as exc:  # noqa: BLE001
-                log.warning("target_save_failed: %s", exc)
+            from .models import UserSettings
+
+            async with dbmod.session() as sess:
+                row = (
+                    await sess.execute(
+                        select(UserSettings).where(UserSettings.user_id == user_id)
+                    )
+                ).scalar_one_or_none()
+                if row is None:
+                    sess.add(UserSettings(user_id=user_id, target_lang=lang))
+                else:
+                    row.target_lang = lang
+                await sess.commit()
+        except Exception as exc:  # noqa: BLE001
+            log.warning("target_save_failed: %s", exc)
 
     async def daily_soft_cap(self, user_id: int) -> int:
         memo_val = self._memo_get(self._cap_memo, user_id)
         if memo_val is not None:
             return memo_val
+
+        # Check discovered users registry
+        if hasattr(self, "_discovered_users") and user_id in self._discovered_users:
+            cap = self._discovered_users[user_id].get("daily_soft_cap")
+            if cap:
+                self._memo_set(self._cap_memo, user_id, int(cap))
+                return int(cap)
+
         if dbmod.is_configured():
             try:
                 from sqlalchemy import select
@@ -194,7 +214,7 @@ class UserStore:
                     return cap
             except Exception:  # noqa: BLE001
                 pass
-        cap = 200
+        cap = 500 if user_id in self._seed_admin else 200
         self._memo_set(self._cap_memo, user_id, cap)
         return cap
 
@@ -280,8 +300,10 @@ class UserStore:
             except Exception as exc:  # noqa: BLE001
                 log.warning("user_profile_sync_failed: %s", exc)
 
-        # Invalidate memo
-        self.invalidate(user_id)
+        # Populate memo if new user, without clearing existing user cache
+        if is_new and (auto_allow or is_admin):
+            self._memo_set(self._allowed_memo, user_id, (True, default_role))
+            self._memo_set(self._cap_memo, user_id, default_cap)
 
         # Broadcast SSE if new user discovered
         if is_new:

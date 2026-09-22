@@ -153,11 +153,13 @@ async def cmd_whoami(message: Message, services: Services) -> None:
             user_store=services.user_store,
         )
         if message.from_user:
-            await services.user_store.sync_user_profile(
-                message.from_user.id,
-                full_name=message.from_user.full_name,
-                username=message.from_user.username,
-                auto_allow=allowed,
+            asyncio.create_task(
+                services.user_store.sync_user_profile(
+                    message.from_user.id,
+                    full_name=message.from_user.full_name,
+                    username=message.from_user.username,
+                    auto_allow=allowed,
+                )
             )
         if not allowed:
             await services.alerts.send(

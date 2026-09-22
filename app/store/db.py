@@ -59,7 +59,7 @@ def get_engine():
                 max_overflow=10,
                 pool_timeout=10.0,
                 pool_recycle=300,
-                pool_pre_ping=True,
+                pool_pre_ping=False,
                 connect_args=connect_args,
             )
         else:
