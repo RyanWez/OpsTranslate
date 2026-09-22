@@ -45,11 +45,18 @@ export const useOverviewStore = defineStore('overview', () => {
     }
   }
 
+  function updateTelemetry(telemetry: any): void {
+    if (stats.value) {
+      stats.value.telemetry = telemetry
+    }
+  }
+
   return {
     stats,
     loading,
     error,
     fetchOverview,
+    updateTelemetry,
     startAutoRefresh,
     stopAutoRefresh,
   }

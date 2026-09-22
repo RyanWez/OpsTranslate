@@ -30,9 +30,28 @@ from ..store.providers import (
     save_stored_providers,
     sync_router_providers,
 )
+from fastapi.responses import StreamingResponse
+from .sse import broadcaster, sse_event_stream
 from .auth import get_expected_token, is_authenticated, require_admin, verify_password
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+
+# ---- SSE Real-time Stream -------------------------------------------------
+
+@router.get("/events", dependencies=[Depends(require_admin)])
+async def sse_events(request: Request):
+    """Server-Sent Events (SSE) stream for real-time dashboard state synchronization."""
+    q = broadcaster.subscribe()
+    return StreamingResponse(
+        sse_event_stream(q),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 # ---- Request / Response Models --------------------------------------------
@@ -262,6 +281,8 @@ async def create_provider(payload: ProviderPayload, request: Request):
                 await sess.refresh(p)
                 new_provider_id = p.id
             await sync_router_providers(services.router)
+            broadcaster.broadcast("providers_changed", {"action": "create", "id": new_provider_id, "name": payload.name})
+            broadcaster.broadcast("overview_changed", {})
             return {"ok": True, "id": new_provider_id, "message": "Provider created and router reloaded."}
         except HTTPException:
             raise
@@ -287,6 +308,8 @@ async def create_provider(payload: ProviderPayload, request: Request):
     stored.append(new_entry)
     save_stored_providers(stored)
     await sync_router_providers(services.router)
+    broadcaster.broadcast("providers_changed", {"action": "create", "id": next_id, "name": payload.name})
+    broadcaster.broadcast("overview_changed", {})
 
     return {"ok": True, "id": next_id, "message": "Provider created and saved to disk."}
 
@@ -319,6 +342,8 @@ async def update_provider(provider_id: str, payload: ProviderPayload, request: R
                         p.api_key = payload.api_key
                     await sess.commit()
                     await sync_router_providers(services.router)
+                    broadcaster.broadcast("providers_changed", {"action": "update", "id": provider_id, "name": payload.name})
+                    broadcaster.broadcast("overview_changed", {})
                     return {"ok": True, "message": "Provider updated and router reloaded."}
         except Exception:
             pass
@@ -349,6 +374,8 @@ async def update_provider(provider_id: str, payload: ProviderPayload, request: R
 
     save_stored_providers(stored)
     await sync_router_providers(services.router)
+    broadcaster.broadcast("providers_changed", {"action": "update", "id": provider_id, "name": payload.name})
+    broadcaster.broadcast("overview_changed", {})
     return {"ok": True, "message": "Provider updated and saved to disk."}
 
 
@@ -370,6 +397,8 @@ async def delete_provider(provider_id: str, request: Request):
                     await sess.delete(p)
                     await sess.commit()
                     await sync_router_providers(services.router)
+                    broadcaster.broadcast("providers_changed", {"action": "delete", "id": provider_id})
+                    broadcaster.broadcast("overview_changed", {})
                     return {"ok": True, "message": "Provider deleted and router reloaded."}
         except Exception:
             pass
@@ -387,6 +416,8 @@ async def delete_provider(provider_id: str, request: Request):
 
     save_stored_providers(stored)
     await sync_router_providers(services.router)
+    broadcaster.broadcast("providers_changed", {"action": "delete", "id": provider_id})
+    broadcaster.broadcast("overview_changed", {})
     return {"ok": True, "message": "Provider deleted and removed from disk."}
 
 
@@ -566,6 +597,7 @@ async def add_or_update_user(payload: UserPayload, request: Request):
 
     # Invalidate memory cache
     services.user_store.invalidate(payload.user_id)
+    broadcaster.broadcast("users_changed", {"action": "save", "user_id": payload.user_id})
     return {"ok": True, "message": "User saved."}
 
 
@@ -583,6 +615,7 @@ async def delete_user(user_id: int, request: Request):
                 await sess.commit()
 
     services.user_store.invalidate(user_id)
+    broadcaster.broadcast("users_changed", {"action": "delete", "user_id": user_id})
     return {"ok": True, "message": "User deleted."}
 
 

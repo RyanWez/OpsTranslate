@@ -24,7 +24,7 @@ def load_stored_providers() -> list[dict]:
         try:
             with open(PROVIDERS_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
-                if isinstance(data, list) and data:
+                if isinstance(data, list):
                     return data
         except Exception as exc:
             log.warning("failed to load providers.json: %s", exc)

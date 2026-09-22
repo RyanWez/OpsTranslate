@@ -1,6 +1,18 @@
 <script setup lang="ts">
+import { onMounted, onUnmounted } from 'vue'
 import AppHeader from './AppHeader.vue'
 import AppSidebar from './AppSidebar.vue'
+import { useRealtimeStore } from '../../stores/realtime'
+
+const realtimeStore = useRealtimeStore()
+
+onMounted(() => {
+  realtimeStore.connect()
+})
+
+onUnmounted(() => {
+  realtimeStore.disconnect()
+})
 </script>
 
 <template>

@@ -40,11 +40,21 @@ export const useLogsStore = defineStore('logs', () => {
     }
   }
 
+  function addLiveLog(item: UsageLogItem): void {
+    if (!logs.value.some((l) => l.id === item.id)) {
+      logs.value.unshift(item)
+      if (logs.value.length > limit.value) {
+        logs.value.pop()
+      }
+    }
+  }
+
   return {
     logs,
     loading,
     limit,
     fetchLogs,
+    addLiveLog,
     startLiveSync,
     stopLiveSync,
   }

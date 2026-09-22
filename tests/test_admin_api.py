@@ -124,17 +124,25 @@ def test_admin_policy_endpoint(client, auth_headers):
 
 
 def test_admin_providers_update_and_delete_in_memory(client, auth_headers):
-    # 1. Check listed providers have id
-    res = client.get("/api/admin/providers", headers=auth_headers)
+    # Clean up test item if leftover
+    client.delete("/api/admin/providers/test-crud-item", headers=auth_headers)
+
+    # 1. Create a dedicated provider for update/delete test
+    setup_payload = {
+        "name": "test-crud-item",
+        "base_url": "https://crud.example.com/v1",
+        "model": "crud-base-model",
+        "priority": 9,
+        "timeout_s": 10.0,
+        "enabled": True,
+        "api_key": "sk-crud-123",
+    }
+    res = client.post("/api/admin/providers", json=setup_payload, headers=auth_headers)
     assert res.status_code == 200
-    providers = res.json()["providers"]
-    assert len(providers) >= 1
-    target = providers[0]
-    assert target["id"] is not None
 
     # 2. Update provider
     update_payload = {
-        "name": target["name"],
+        "name": "test-crud-item",
         "base_url": "https://updated.example.com/v1",
         "model": "test-updated-model",
         "priority": 3,
@@ -142,25 +150,25 @@ def test_admin_providers_update_and_delete_in_memory(client, auth_headers):
         "enabled": True,
         "api_key": "sk-updated-key",
     }
-    res = client.put(f"/api/admin/providers/{target['name']}", json=update_payload, headers=auth_headers)
+    res = client.put("/api/admin/providers/test-crud-item", json=update_payload, headers=auth_headers)
     assert res.status_code == 200
     assert res.json()["ok"] is True
 
     # Verify update reflected
     res = client.get("/api/admin/providers", headers=auth_headers)
-    updated_p = next(p for p in res.json()["providers"] if p["name"] == target["name"])
+    updated_p = next(p for p in res.json()["providers"] if p["name"] == "test-crud-item")
     assert updated_p["base_url"] == "https://updated.example.com/v1"
     assert updated_p["model"] == "test-updated-model"
 
     # 3. Delete provider
-    res = client.delete(f"/api/admin/providers/{target['name']}", headers=auth_headers)
+    res = client.delete("/api/admin/providers/test-crud-item", headers=auth_headers)
     assert res.status_code == 200
     assert res.json()["ok"] is True
 
     # Verify deleted
     res = client.get("/api/admin/providers", headers=auth_headers)
     remaining_names = [p["name"] for p in res.json()["providers"]]
-    assert target["name"] not in remaining_names
+    assert "test-crud-item" not in remaining_names
 
 
 def test_admin_audit_logs_fallback(client, auth_headers):

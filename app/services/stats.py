@@ -76,6 +76,12 @@ class Stats:
             "created_at": fields.get("created_at") or time.strftime("%Y-%m-%d %H:%M:%S"),
         }
         self.recent_logs.appendleft(log_entry)
+        try:
+            from ..admin.sse import broadcaster
+            broadcaster.broadcast("usage_log", log_entry)
+            broadcaster.broadcast("telemetry_update", self.get_telemetry())
+        except Exception:
+            pass
 
     def record_ok(self, latency_s: float, cache_hit: bool) -> None:
         now = time.time()

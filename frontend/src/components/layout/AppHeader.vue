@@ -4,6 +4,7 @@ import { useAuthStore } from '../../stores/auth'
 import { useOverviewStore } from '../../stores/overview'
 import { useProvidersStore } from '../../stores/providers'
 import { useLogsStore } from '../../stores/logs'
+import { useRealtimeStore } from '../../stores/realtime'
 import { NButton, NTag } from 'naive-ui'
 import { RefreshOutline, LogOutOutline } from '@vicons/ionicons5'
 
@@ -11,6 +12,7 @@ const authStore = useAuthStore()
 const overviewStore = useOverviewStore()
 const providersStore = useProvidersStore()
 const logsStore = useLogsStore()
+const realtimeStore = useRealtimeStore()
 
 const serverClock = ref<string>('')
 let timer: any = null
@@ -64,16 +66,25 @@ function handleLogout() {
 
       <div class="h-4 w-[1px] bg-gray-700 hidden md:block"></div>
 
-      <!-- Live Heartbeat & Sync status pill -->
+      <!-- Live SSE status indicator -->
       <div
+        v-if="realtimeStore.isConnected"
         class="hidden sm:flex items-center space-x-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20"
-        title="Real-time live sync enabled (3s auto-update across all devices)"
+        title="Server-Sent Events (SSE) active - 0ms instant cross-device synchronization"
       >
         <span class="relative flex h-2 w-2">
           <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
           <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
         </span>
-        <span class="text-xs font-medium text-emerald-400">Live Sync (3s)</span>
+        <span class="text-xs font-medium text-emerald-400">Instant Live (SSE)</span>
+      </div>
+      <div
+        v-else
+        class="hidden sm:flex items-center space-x-2 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/20"
+        title="Reconnecting real-time stream..."
+      >
+        <span class="relative inline-flex rounded-full h-2 w-2 bg-amber-400 animate-pulse"></span>
+        <span class="text-xs font-medium text-amber-400">Connecting SSE...</span>
       </div>
     </div>
 

@@ -28,6 +28,10 @@ def is_authenticated(request: Request) -> bool:
     cookie_token = request.cookies.get("admin_session")
     if cookie_token and isinstance(cookie_token, str) and hmac.compare_digest(cookie_token, expected):
         return True
+    # Check query param (for EventSource SSE)
+    query_token = request.query_params.get("token")
+    if query_token and isinstance(query_token, str) and hmac.compare_digest(query_token, expected):
+        return True
     # Check header: Authorization: Bearer <token>
     auth_header = request.headers.get("Authorization") or request.headers.get("authorization")
     if auth_header and isinstance(auth_header, str):
