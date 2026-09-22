@@ -95,19 +95,20 @@ class PlaygroundRequest(BaseModel):
 # ---- Auth Endpoints -------------------------------------------------------
 
 @router.post("/login")
-async def login(req: LoginRequest, response: Response):
+async def login(req: LoginRequest, request: Request, response: Response):
     if not verify_password(req.password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect admin password.",
         )
     token = get_expected_token()
+    is_https = request.headers.get("x-forwarded-proto") == "https" or request.url.scheme == "https"
     response.set_cookie(
         key="admin_session",
         value=token,
         httponly=True,
-        samesite="lax",
-        secure=False,  # Set to True on HTTPS via reverse proxy
+        samesite="none" if is_https else "lax",
+        secure=is_https,
         max_age=86400 * 7,  # 7 days
     )
     return {"ok": True, "token": token}
@@ -122,8 +123,10 @@ async def logout(response: Response):
 @router.get("/me")
 async def get_me(request: Request):
     auth = is_authenticated(request)
+    token = get_expected_token() if auth else None
     return {
         "authenticated": auth,
+        "token": token,
         "app": "OpsTranslate Control Center",
         "mode": config.MODE,
     }

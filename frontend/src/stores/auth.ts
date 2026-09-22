@@ -16,6 +16,9 @@ export const useAuthStore = defineStore('auth', () => {
       isAuthenticated.value = res.data.authenticated
       appName.value = res.data.app || 'OpsTranslate Control Center'
       mode.value = res.data.mode || 'polling'
+      if (res.data.token) {
+        localStorage.setItem('admin_token', res.data.token)
+      }
       initialized.value = true
       return isAuthenticated.value
     } catch {

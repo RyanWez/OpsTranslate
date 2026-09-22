@@ -79,12 +79,24 @@ function handleLogout() {
         <span class="text-xs font-medium text-emerald-400">Instant Live (SSE)</span>
       </div>
       <div
-        v-else
+        v-else-if="realtimeStore.isConnecting"
         class="hidden sm:flex items-center space-x-2 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/20"
-        title="Reconnecting real-time stream..."
+        title="Connecting to real-time stream..."
       >
         <span class="relative inline-flex rounded-full h-2 w-2 bg-amber-400 animate-pulse"></span>
         <span class="text-xs font-medium text-amber-400">Connecting SSE...</span>
+      </div>
+      <div
+        v-else
+        class="hidden sm:flex items-center space-x-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 cursor-pointer"
+        @click="realtimeStore.connect()"
+        title="Live Sync active"
+      >
+        <span class="relative flex h-2 w-2">
+          <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+          <span class="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+        </span>
+        <span class="text-xs font-medium text-emerald-400">Live Sync</span>
       </div>
     </div>
 

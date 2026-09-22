@@ -13,11 +13,25 @@ export const useRealtimeStore = defineStore('realtime', () => {
   let eventSource: EventSource | null = null
   let reconnectTimer: any = null
 
-  function connect() {
+  async function connect() {
     if (eventSource) return
 
     isConnecting.value = true
-    const token = localStorage.getItem('admin_token') || ''
+    let token = localStorage.getItem('admin_token') || ''
+
+    if (!token) {
+      try {
+        const res = await fetch('/api/admin/me', { credentials: 'include' })
+        if (res.ok) {
+          const data = await res.json()
+          if (data.token) {
+            token = data.token
+            localStorage.setItem('admin_token', data.token)
+          }
+        }
+      } catch {}
+    }
+
     const url = token ? `/api/admin/events?token=${encodeURIComponent(token)}` : '/api/admin/events'
 
     try {
@@ -30,6 +44,11 @@ export const useRealtimeStore = defineStore('realtime', () => {
           clearTimeout(reconnectTimer)
           reconnectTimer = null
         }
+      }
+
+      eventSource.onmessage = () => {
+        isConnected.value = true
+        isConnecting.value = false
       }
 
       eventSource.addEventListener('connected', () => {

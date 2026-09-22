@@ -1,5 +1,6 @@
 export interface MeResponse {
   authenticated: boolean
+  token?: string | null
   app: string
   mode: string
 }
