@@ -527,21 +527,29 @@ async def run_translation(
             return
 
         # -- Gate 8: rate limit (sliding window, in-process) ----------------
-        wait_s = ratelimit.check(user_id)
-        if wait_s:
-            await services.bot.send_message(
-                chat_id,
-                strings.RATE_LIMIT.format(n=wait_s),
-                reply_parameters=ReplyParameters(
-                    message_id=anchor_message_id, allow_sending_without_reply=True
-                ),
-            )
-            await log_usage(
-                services, user_id=user_id, src_lang=src, dst_lang=dst,
-                char_len=len(raw_text), status="rate_limited",
-                policy_version=services.policy.version,
-            )
-            return
+        is_admin_user = (
+            user_id in config.ADMIN_USER_IDS
+            or (await services.user_store.is_allowed(user_id))[1] == "admin"
+        )
+        should_check_rate = config.RATE_LIMIT_ENABLED and not (
+            config.RATE_LIMIT_BYPASS_ADMINS and is_admin_user
+        )
+        if should_check_rate:
+            wait_s = ratelimit.check(user_id)
+            if wait_s:
+                await services.bot.send_message(
+                    chat_id,
+                    strings.RATE_LIMIT.format(n=wait_s),
+                    reply_parameters=ReplyParameters(
+                        message_id=anchor_message_id, allow_sending_without_reply=True
+                    ),
+                )
+                await log_usage(
+                    services, user_id=user_id, src_lang=src, dst_lang=dst,
+                    char_len=len(raw_text), status="rate_limited",
+                    policy_version=services.policy.version,
+                )
+                return
 
         if not config.IGNORE_DAILY_CAPS:
             soft_cap = await services.user_store.daily_soft_cap(user_id)

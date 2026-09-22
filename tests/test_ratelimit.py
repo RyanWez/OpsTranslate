@@ -37,3 +37,28 @@ def test_countdown_is_live():
     # At t=1015 the oldest hit (t=1000) expires at t=1030 -> wait ~15s.
     wait = ratelimit.check(10, now=1015.0)
     assert 14 <= wait <= 16
+
+
+def test_rate_limit_disabled(monkeypatch):
+    from app import config
+    ratelimit.reset(11)
+    monkeypatch.setattr(config, "RATE_LIMIT_ENABLED", False)
+    # Should never be rejected when disabled
+    for i in range(10):
+        assert ratelimit.check(11, now=1000.0 + i) == 0
+
+
+def test_custom_limit_and_window(monkeypatch):
+    from app import config
+    ratelimit.reset(12)
+    monkeypatch.setattr(config, "RATE_LIMIT_ENABLED", True)
+    monkeypatch.setattr(config, "RATE_LIMIT_COUNT", 4)
+    monkeypatch.setattr(config, "RATE_LIMIT_WINDOW_S", 10.0)
+
+    # 4 allowed
+    for i in range(4):
+        assert ratelimit.check(12, now=1000.0 + i) == 0
+    # 5th rejected
+    wait = ratelimit.check(12, now=1004.0)
+    assert wait > 0
+    assert wait <= 10.0

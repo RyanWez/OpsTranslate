@@ -388,3 +388,30 @@ def test_copy_keyboard_length_guard():
     max_text = "a" * 256
     assert pipeline.copy_keyboard(max_text) is not None
 
+
+async def test_rate_limit_hits_and_admin_bypasses(monkeypatch):
+    bot, router = FakeBot(), StubRouter(["User ID is wrong", "User ID is wrong", "User ID is wrong"])
+    services = make_services(bot, router)
+    monkeypatch.setattr(config, "RATE_LIMIT_ENABLED", True)
+    monkeypatch.setattr(config, "RATE_LIMIT_COUNT", 2)
+    monkeypatch.setattr(config, "RATE_LIMIT_WINDOW_S", 30.0)
+    monkeypatch.setattr(config, "RATE_LIMIT_BYPASS_ADMINS", True)
+
+    # 1. Normal user (USER=11, role='staff') sends 2 messages with different text to avoid duplicate gate
+    await run(services, "ဂိမ်းအိုင်ဒီ တစ်", user=USER)
+    await run(services, "ဂိမ်းအိုင်ဒီ နှစ်", user=USER)
+    assert router.calls == 2
+
+    # 3rd message from normal user hits rate limit
+    await run(services, "ဂိမ်းအိုင်ဒီ သုံး", user=USER)
+    assert router.calls == 2
+    assert "Limit: 2 messages per 30 seconds." in bot.sent[-1].text
+
+    # 2. Admin user (user=999 in ADMIN_USER_IDS) bypasses rate limit
+    monkeypatch.setattr(config, "ADMIN_USER_IDS", [999])
+    await run(services, "ဂိမ်းအိုင်ဒီ admin 1", user=999)
+    await run(services, "ဂိမ်းအိုင်ဒီ admin 2", user=999)
+    await run(services, "ဂိမ်းအိုင်ဒီ admin 3", user=999)
+    # Admin calls went through to router without being rate-limited
+    assert router.calls == 5
+

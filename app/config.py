@@ -127,6 +127,12 @@ PROVIDER_COST_PER_MSG_USD = _get_float("PROVIDER_COST_PER_MSG_USD", 0.0004)
 IGNORE_DAILY_CAPS = _get_bool("IGNORE_DAILY_CAPS", False)
 WITHHOLD_ON_LEAK = _get_bool("WITHHOLD_ON_LEAK", True)
 
+# --- Rate limiting (sliding window burst protection) -------------------------
+RATE_LIMIT_ENABLED = _get_bool("RATE_LIMIT_ENABLED", True)
+RATE_LIMIT_COUNT = _get_int("RATE_LIMIT_COUNT", 2)
+RATE_LIMIT_WINDOW_S = _get_float("RATE_LIMIT_WINDOW_S", 30.0)
+RATE_LIMIT_BYPASS_ADMINS = _get_bool("RATE_LIMIT_BYPASS_ADMINS", True)
+
 # --- Group gate (Phase 0: GP-member-only access) ---------------------------
 # Private DM requests are served ONLY to members of this group chat:
 # getChatMember(GROUP_CHAT_ID, user_id) -> member/administrator/creator.

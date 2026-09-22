@@ -26,12 +26,15 @@ def welcome_text() -> str:
 
 
 def help_text() -> str:
+    count = getattr(config, "RATE_LIMIT_COUNT", 2)
+    win = int(getattr(config, "RATE_LIMIT_WINDOW_S", 30))
+    limit_clause = f", {count} messages per {win} seconds" if getattr(config, "RATE_LIMIT_ENABLED", True) else ""
     return (
         "How to use:\n"
         "\u2022 Send a Myanmar message - I'll translate it to English.\n"
         "\u2022 Send an English message - I'll translate it to Myanmar.\n"
         "\u2022 Reply to a message with /tr to translate that message.\n"
-        f"\u2022 Limits: {_limit()} characters per message, 2 messages per 30 seconds.\n"
+        f"\u2022 Limits: {_limit()} characters per message{limit_clause}.\n"
         "\u2022 Nothing you send is stored."
     )
 
@@ -61,13 +64,20 @@ def __getattr__(name: str) -> str:
         )
     if name == "UNSUPPORTED_TYPE":
         return unsupported_type_text()
+    if name == "RATE_LIMIT":
+        count = getattr(config, "RATE_LIMIT_COUNT", 2)
+        win = int(getattr(config, "RATE_LIMIT_WINDOW_S", 30))
+        return (
+            "Please wait {n}s and send again.\n"
+            f"Limit: {count} messages per {win} seconds."
+        )
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def __dir__() -> list[str]:
     return sorted(
         list(globals().keys())
-        + ["WELCOME", "HELP", "TOO_LONG", "UNSUPPORTED_TYPE"]
+        + ["WELCOME", "HELP", "TOO_LONG", "UNSUPPORTED_TYPE", "RATE_LIMIT"]
     )
 
 TARGET_SET = "Target language set to {LANG}."
@@ -83,10 +93,6 @@ TRANSLATING = "\u23f3 Translating\u2026"
 TRANSLATION_HEADER = "\U0001f310 {SRC} \u2192 {DST}"
 COPY_BUTTON = "Copy"
 
-RATE_LIMIT = (
-    "Please wait {n}s and send again.\n"
-    "Limit: 2 messages per 30 seconds."
-)
 NOT_AUTHORIZED = (
     "This bot is restricted to authorised staff.\n"
     "Your ID: {user_id}"
