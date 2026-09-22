@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import datetime
+import logging
 import time
 from typing import Any, Optional
 
@@ -47,6 +48,7 @@ from .auth import (
 from zoneinfo import ZoneInfo
 
 YANGON = ZoneInfo("Asia/Yangon")
+log = logging.getLogger("opstranslate.admin")
 
 
 def to_mmt_str(dt: datetime.datetime | None, fmt: str = "%Y-%m-%d %H:%M:%S") -> str | None:
@@ -371,10 +373,9 @@ async def list_providers(request: Request):
                         "breaker_state": breaker_states.get(row.name, "unknown"),
                         "source": "database",
                     })
-                if out:
-                    return {"providers": out}
-        except Exception:
-            pass
+                return {"providers": out}
+        except Exception as exc:
+            log.warning("failed to load providers from db: %s", exc)
 
     # Persistent local storage (data/providers.json)
     stored = load_stored_providers()
@@ -489,6 +490,7 @@ async def update_provider(provider_id: str, payload: ProviderPayload, request: R
                     broadcaster.broadcast("providers_changed", {"action": "update", "id": provider_id, "name": payload.name})
                     broadcaster.broadcast("overview_changed", {})
                     return {"ok": True, "message": "Provider updated and router reloaded."}
+                raise HTTPException(status_code=404, detail=f"Provider '{provider_id}' not found.")
         except HTTPException:
             raise
         except Exception as exc:
@@ -546,6 +548,7 @@ async def delete_provider(provider_id: str, request: Request):
                     broadcaster.broadcast("providers_changed", {"action": "delete", "id": provider_id})
                     broadcaster.broadcast("overview_changed", {})
                     return {"ok": True, "message": "Provider deleted and router reloaded."}
+                raise HTTPException(status_code=404, detail=f"Provider '{provider_id}' not found.")
         except HTTPException:
             raise
         except Exception as exc:
