@@ -29,59 +29,27 @@ def load_stored_providers() -> list[dict]:
         except Exception as exc:
             log.warning("failed to load providers.json: %s", exc)
 
-    # Initial seed from config.provider_defs() or default working providers
+    # Initial seed from config.provider_defs() if configured
     seed = []
     defs = config.provider_defs()
-    has_gemini = any(d.get("name") == "gemini" for d in defs)
-
-    if not has_gemini and len(defs) == 1 and defs[0].get("name") == "primary":
-        seed = [
-            {
-                "id": 1,
-                "name": "gemini",
-                "base_url": "https://gemini-api.online/v1",
-                "api_key": "sk-qOu89KfOdTSGfmhy4bfvAtyjAnunDznFCGwyFAugA1QGQ0W6",
-                "model": "gemini-3.8-flash-tiered",
-                "priority": 1,
-                "enabled": True,
-                "timeout_s": 30.0,
-            },
-            {
-                "id": 2,
-                "name": "vsllm-primary",
-                "base_url": "https://vsllm.cc/v1",
-                "api_key": "sk-RcahJnr8Sut3NXPGTCAIPwwjq5WFpHkoDNLsxzKR1SVBWk6y",
-                "model": "gemini-3.5-flash-lite",
-                "priority": 2,
-                "enabled": True,
-                "timeout_s": 30.0,
-            },
-            {
-                "id": 3,
-                "name": "Careke",
-                "base_url": defs[0].get("base_url") or "https://api.careke.cn/v1",
-                "api_key": defs[0].get("api_key") or "",
-                "model": defs[0].get("model") or "gemini-3-flash",
-                "priority": 3,
-                "enabled": False,  # Off by default as user location is blocked
-                "timeout_s": 30.0,
-            },
-        ]
-    else:
-        for idx, d in enumerate(defs):
-            name = d.get("name", f"provider-{idx+1}")
-            if name == "primary":
-                name = "Careke" if "careke" in (d.get("base_url") or "") else "primary"
-            seed.append({
-                "id": idx + 1,
-                "name": name,
-                "base_url": (d.get("base_url") or "").rstrip("/"),
-                "api_key": d.get("api_key") or "",
-                "model": d.get("model") or "",
-                "priority": int(d.get("priority", idx + 1)),
-                "enabled": bool(d.get("enabled", True)),
-                "timeout_s": float(d.get("timeout_s", config.PROVIDER_TIMEOUT_S)),
-            })
+    for idx, d in enumerate(defs):
+        base_url = (d.get("base_url") or "").rstrip("/")
+        api_key = d.get("api_key") or ""
+        model = d.get("model") or ""
+        # Skip empty placeholder defaults when no config was provided in env
+        if not base_url and not api_key and not model:
+            continue
+        name = d.get("name", f"provider-{idx+1}")
+        seed.append({
+            "id": idx + 1,
+            "name": name,
+            "base_url": base_url,
+            "api_key": api_key,
+            "model": model,
+            "priority": int(d.get("priority", idx + 1)),
+            "enabled": bool(d.get("enabled", True)),
+            "timeout_s": float(d.get("timeout_s", config.PROVIDER_TIMEOUT_S)),
+        })
 
     save_stored_providers(seed)
     return seed
