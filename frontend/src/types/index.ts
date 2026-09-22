@@ -105,6 +105,8 @@ export interface PlaygroundResult {
 export interface UsageLogItem {
   id: number
   user_id: number
+  display_name?: string | null
+  username?: string | null
   char_len: number
   provider: string
   latency_ms: number

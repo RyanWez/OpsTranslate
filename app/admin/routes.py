@@ -985,15 +985,44 @@ async def get_logs(
     start_ts = _parse_ts_param(start_time)
     end_ts = _parse_ts_param(end_time)
 
+    user_names: dict[int, dict] = {}
+    for uid in config.ADMIN_USER_IDS:
+        user_names[uid] = {"display_name": "Admin (Env)", "username": None}
+    for uid in config.ALLOWED_USER_IDS:
+        user_names[uid] = {"display_name": "Staff (Env)", "username": None}
+
+    if hasattr(services.user_store, "get_discovered_users"):
+        for d in services.user_store.get_discovered_users():
+            uid = d.get("user_id")
+            if uid:
+                user_names[uid] = {
+                    "display_name": d.get("display_name"),
+                    "username": d.get("username"),
+                }
+
+    if dbmod.is_configured():
+        try:
+            from sqlalchemy import select
+            async with dbmod.session() as sess:
+                rows = (await sess.execute(select(AllowedUser.user_id, AllowedUser.display_name, AllowedUser.username))).all()
+                for uid, dname, uname in rows:
+                    user_names[uid] = {"display_name": dname, "username": uname}
+        except Exception:
+            pass
+
     def _format_log(raw: dict) -> dict:
         st = raw.get("status", 200)
         norm_status = 200 if st == "ok" else st
         prov = raw.get("provider")
         if not prov or prov == "unknown":
             prov = "cache" if raw.get("cache_hit") else "default"
+        uid = raw.get("user_id", 0)
+        u_info = user_names.get(uid, {})
         return {
             "id": raw.get("id"),
-            "user_id": raw.get("user_id", 0),
+            "user_id": uid,
+            "display_name": raw.get("display_name") or u_info.get("display_name"),
+            "username": raw.get("username") or u_info.get("username"),
             "char_len": raw.get("char_len", 0),
             "provider": prov,
             "latency_ms": raw.get("latency_ms", 0),
@@ -1042,9 +1071,12 @@ async def get_logs(
             rows = result.scalars().all()
             logs = []
             for r in rows:
+                u_info = user_names.get(r.user_id, {})
                 logs.append({
                     "id": r.id,
                     "user_id": r.user_id,
+                    "display_name": u_info.get("display_name"),
+                    "username": u_info.get("username"),
                     "char_len": r.char_len,
                     "provider": getattr(r, "provider", None) or ("cache" if getattr(r, "cache_hit", False) else "default"),
                     "latency_ms": r.latency_ms,

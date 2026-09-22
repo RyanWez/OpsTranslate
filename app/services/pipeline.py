@@ -396,6 +396,20 @@ async def _delete_placeholder(services: Services, chat_id: int, placeholder_id: 
 # ---------------------------------------------------------------------------
 
 async def log_usage(services: Services, **fields) -> None:
+    user_id = fields.get("user_id")
+    if user_id and not fields.get("display_name"):
+        try:
+            if hasattr(services.user_store, "_discovered_users") and user_id in services.user_store._discovered_users:
+                u = services.user_store._discovered_users[user_id]
+                fields["display_name"] = u.get("display_name")
+                fields["username"] = u.get("username")
+            elif hasattr(services.user_store, "_seed_admin") and user_id in services.user_store._seed_admin:
+                fields["display_name"] = "Admin (Env)"
+            elif hasattr(services.user_store, "_seed_staff") and user_id in services.user_store._seed_staff:
+                fields["display_name"] = "Staff (Env)"
+        except Exception:
+            pass
+
     # Always record into in-memory ring buffer so admin logs view has telemetry
     try:
         services.stats.record_usage_log(fields)
@@ -408,8 +422,9 @@ async def log_usage(services: Services, **fields) -> None:
     if not dbmod.is_configured():
         return
     try:
+        db_fields = {k: v for k, v in fields.items() if k not in ("display_name", "username")}
         async with dbmod.session() as sess:
-            sess.add(UsageLog(**fields))
+            sess.add(UsageLog(**db_fields))
             await sess.commit()
     except Exception as exc:  # noqa: BLE001 - logging must never break the flow
         log.warning("usage_log_failed: %s", exc)

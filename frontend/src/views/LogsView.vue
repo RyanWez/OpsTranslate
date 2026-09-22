@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted, computed, h } from 'vue'
 import { useRouter } from 'vue-router'
 import { useLogsStore, getTodayRange } from '../stores/logs'
 import { usePlaygroundStore } from '../stores/playground'
+import { useUsersStore } from '../stores/users'
 import { useMobile } from '../composables/useMobile'
 import {
   NCard,
@@ -28,15 +29,34 @@ import type { UsageLogItem } from '../types'
 const router = useRouter()
 const logsStore = useLogsStore()
 const playgroundStore = usePlaygroundStore()
+const usersStore = useUsersStore()
 const { isMobile } = useMobile()
 
 onMounted(() => {
   logsStore.startLiveSync(3000)
+  usersStore.fetchUsers(true)
 })
 
 onUnmounted(() => {
   logsStore.stopLiveSync()
 })
+
+const usersMap = computed(() => {
+  const map = new Map<number, { display_name: string | null; username?: string | null }>()
+  for (const u of usersStore.users) {
+    if (u.user_id) {
+      map.set(u.user_id, { display_name: u.display_name, username: u.username })
+    }
+  }
+  return map
+})
+
+function getUserLabel(row: UsageLogItem) {
+  const cached = usersMap.value.get(row.user_id)
+  const name = row.display_name || cached?.display_name || null
+  const username = row.username || cached?.username || null
+  return { name, username, id: row.user_id }
+}
 
 const searchQuery = ref('')
 const selectedProvider = ref<string | null>(null)
@@ -158,12 +178,15 @@ const filteredLogs = computed(() => {
 
   if (searchQuery.value.trim()) {
     const q = searchQuery.value.trim().toLowerCase()
-    list = list.filter(
-      (l: UsageLogItem) =>
-        String(l.user_id).includes(q) ||
-        (l.provider || '').toLowerCase().includes(q) ||
-        (l.policy_hits || []).some((p: string) => p.toLowerCase().includes(q))
-    )
+    list = list.filter((l: UsageLogItem) => {
+      const u = getUserLabel(l)
+      const nameMatch = u.name?.toLowerCase().includes(q)
+      const unameMatch = u.username?.toLowerCase().includes(q)
+      const idMatch = String(l.user_id).includes(q)
+      const provMatch = (l.provider || '').toLowerCase().includes(q)
+      const hitMatch = (l.policy_hits || []).some((p: string) => p.toLowerCase().includes(q))
+      return nameMatch || unameMatch || idMatch || provMatch || hitMatch
+    })
   }
   return list
 })
@@ -183,17 +206,22 @@ function sendToPlayground(conceptHit?: string) {
 
 function exportToCsv() {
   if (!filteredLogs.value.length) return
-  const headers = ['ID', 'Timestamp', 'UserID', 'Provider', 'CharLen', 'LatencyMs', 'StatusCode', 'PolicyHits']
-  const rows = filteredLogs.value.map((l) => [
-    l.id,
-    `"${l.created_at || ''}"`,
-    l.user_id,
-    `"${l.provider}"`,
-    l.char_len,
-    l.latency_ms,
-    l.status,
-    `"${(l.policy_hits || []).join('; ')}"`,
-  ])
+  const headers = ['ID', 'Timestamp', 'Staff Name', 'Username', 'UserID', 'Provider', 'CharLen', 'LatencyMs', 'StatusCode', 'PolicyHits']
+  const rows = filteredLogs.value.map((l) => {
+    const u = getUserLabel(l)
+    return [
+      l.id,
+      `"${l.created_at || ''}"`,
+      `"${(u.name || '').replace(/"/g, '""')}"`,
+      `"${(u.username || '').replace(/"/g, '""')}"`,
+      l.user_id,
+      `"${l.provider}"`,
+      l.char_len,
+      l.latency_ms,
+      l.status,
+      `"${(l.policy_hits || []).join('; ')}"`,
+    ]
+  })
   const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((e) => e.join(','))].join('\n')
   const encodedUri = encodeURI(csvContent)
   const link = document.createElement('a')
@@ -220,11 +248,36 @@ const columns = [
     },
   },
   {
-    title: 'User ID',
+    title: 'Staff Member',
     key: 'user_id',
-    width: 140,
+    minWidth: 170,
     render(row: UsageLogItem) {
-      return h('span', { class: 'font-mono text-xs font-semibold text-gray-200' }, row.user_id)
+      const u = getUserLabel(row)
+      if (u.name) {
+        return h('div', { class: 'flex flex-col min-w-0 py-0.5' }, [
+          h(
+            'span',
+            {
+              class: 'font-semibold text-xs text-gray-100 truncate max-w-[175px]',
+              title: u.name,
+            },
+            u.name
+          ),
+          h('div', { class: 'flex items-center gap-1.5 text-[10px] text-gray-400 font-mono mt-0.5' }, [
+            u.username
+              ? h(
+                  'span',
+                  { class: 'text-cyan-400/90' },
+                  `@${u.username.replace(/^@/, '')}`
+                )
+              : null,
+            h('span', `ID: ${row.user_id}`),
+          ]),
+        ])
+      }
+      return h('div', { class: 'flex items-center space-x-1' }, [
+        h('span', { class: 'font-mono text-xs font-semibold text-gray-300' }, `ID: ${row.user_id}`),
+      ])
     },
   },
   {
@@ -364,7 +417,7 @@ const columns = [
         <div class="flex-1 min-w-[200px]">
           <NInput
             v-model:value="searchQuery"
-            placeholder="Search by Telegram User ID, Provider, or Policy Concept..."
+            placeholder="Search by Staff Name, @username, User ID, Provider, or Policy Concept..."
             size="small"
             clearable
           >
@@ -516,6 +569,23 @@ const columns = [
             <div class="flex items-center justify-between">
               <span class="text-gray-400">Timestamp</span>
               <span class="font-mono text-gray-300">{{ selectedLog.created_at || '—' }}</span>
+            </div>
+            <div class="flex items-center justify-between">
+              <span class="text-gray-400">Staff Member</span>
+              <span class="font-semibold text-gray-100 truncate max-w-[200px]" :title="getUserLabel(selectedLog).name || ''">
+                {{ getUserLabel(selectedLog).name || '—' }}
+              </span>
+            </div>
+            <div v-if="getUserLabel(selectedLog).username" class="flex items-center justify-between">
+              <span class="text-gray-400">Telegram Username</span>
+              <a
+                :href="`https://t.me/${getUserLabel(selectedLog).username?.replace(/^@/, '')}`"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="font-mono text-cyan-400 hover:underline"
+              >
+                @{{ getUserLabel(selectedLog).username?.replace(/^@/, '') }}
+              </a>
             </div>
             <div class="flex items-center justify-between">
               <span class="text-gray-400">Telegram User ID</span>

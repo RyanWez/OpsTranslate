@@ -42,6 +42,8 @@ class Stats:
             "id": fields.get("id") or self._log_counter,
             "timestamp": now_ts,
             "user_id": fields.get("user_id", 0),
+            "display_name": fields.get("display_name"),
+            "username": fields.get("username"),
             "char_len": fields.get("char_len", 0),
             "provider": prov,
             "latency_ms": fields.get("latency_ms", 0),
