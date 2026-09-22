@@ -44,7 +44,7 @@ async def sse_events(request: Request):
     """Server-Sent Events (SSE) stream for real-time dashboard state synchronization."""
     q = broadcaster.subscribe()
     return StreamingResponse(
-        sse_event_stream(q),
+        sse_event_stream(q, request),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

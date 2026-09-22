@@ -161,7 +161,20 @@ async def lifespan(app: FastAPI):
     except Exception:  # noqa: BLE001
         log.warning("watchdog_start_failed", exc_info=True)
 
+    # Ensure SSE connections drain instantly on shutdown signals
+    from .admin.sse import broadcaster
+
+    import signal
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, broadcaster.close)
+        except (NotImplementedError, RuntimeError):
+            pass
+
     yield
+
+    broadcaster.close()
 
     if watchdog_task is not None:
         watchdog_task.cancel()
