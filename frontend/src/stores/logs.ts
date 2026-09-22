@@ -3,11 +3,18 @@ import { ref } from 'vue'
 import { api } from '../api'
 import type { UsageLogItem } from '../types'
 
+export function getTodayRange(): [number, number] {
+  const now = new Date()
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0)
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999)
+  return [start.getTime(), end.getTime()]
+}
+
 export const useLogsStore = defineStore('logs', () => {
   const logs = ref<UsageLogItem[]>([])
   const loading = ref<boolean>(false)
   const limit = ref<number>(100)
-  const dateRange = ref<[number, number] | null>(null)
+  const dateRange = ref<[number, number] | null>(getTodayRange())
   const selectedProvider = ref<string | null>(null)
   let liveSyncTimer: any = null
 

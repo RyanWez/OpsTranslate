@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, computed, h } from 'vue'
 import { useRouter } from 'vue-router'
-import { useLogsStore } from '../stores/logs'
+import { useLogsStore, getTodayRange } from '../stores/logs'
 import { usePlaygroundStore } from '../stores/playground'
 import { useMobile } from '../composables/useMobile'
 import {
@@ -52,12 +52,7 @@ const limitOptions = [
 
 // Professional Date Shortcuts for quick 1-click filtering
 const dateShortcuts = {
-  Today: () => {
-    const now = new Date()
-    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0)
-    const end = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999)
-    return [start.getTime(), end.getTime()] as [number, number]
-  },
+  Today: () => getTodayRange(),
   Yesterday: () => {
     const now = new Date()
     const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1, 0, 0, 0, 0)
@@ -104,19 +99,31 @@ function handleProviderSelect(val: string) {
   logsStore.fetchLogs()
 }
 
+const isToday = computed(() => {
+  if (!logsStore.dateRange || logsStore.dateRange.length !== 2) return false
+  const today = getTodayRange()
+  const dStart = new Date(logsStore.dateRange[0])
+  const dToday = new Date(today[0])
+  return (
+    dStart.getFullYear() === dToday.getFullYear() &&
+    dStart.getMonth() === dToday.getMonth() &&
+    dStart.getDate() === dToday.getDate()
+  )
+})
+
 const hasActiveFilters = computed(() => {
   return Boolean(
     searchQuery.value.trim() ||
       (selectedProvider.value && selectedProvider.value !== 'all') ||
-      (logsStore.dateRange && logsStore.dateRange.length === 2)
+      !isToday.value
   )
 })
 
-function clearAllFilters() {
+function resetToToday() {
   searchQuery.value = ''
   selectedProvider.value = null
   logsStore.selectedProvider = null
-  logsStore.dateRange = null
+  logsStore.dateRange = getTodayRange()
   logsStore.fetchLogs()
 }
 
@@ -397,30 +404,41 @@ const columns = [
             quaternary
             size="small"
             type="warning"
-            @click="clearAllFilters"
-            title="Reset all active search, date, and provider filters"
+            @click="resetToToday"
+            title="Reset filters back to Today default"
           >
             <template #icon>
               <CloseCircleOutline />
             </template>
-            Reset
+            Reset to Today
           </NButton>
         </div>
       </div>
 
       <!-- Active Filter Status & Match Summary -->
       <div
-        v-if="hasActiveFilters"
         class="mt-3 pt-3 border-t border-gray-800/80 flex flex-wrap items-center justify-between text-xs text-gray-400 gap-2"
       >
         <div class="flex flex-wrap items-center gap-1.5 sm:gap-2">
           <span class="text-gray-500 flex items-center gap-1 font-medium">
             <FilterOutline class="w-3.5 h-3.5 text-cyan-400" />
-            Active Filters:
+            Time Filter:
           </span>
 
           <NTag
-            v-if="logsStore.dateRange"
+            v-if="isToday"
+            size="small"
+            type="success"
+            closable
+            @close="() => handleDateRangeChange(null)"
+            class="font-mono text-[11px]"
+            title="Default: Showing Today only. Click (x) to view all-time logs."
+          >
+            📅 Today (Default)
+          </NTag>
+
+          <NTag
+            v-else-if="logsStore.dateRange"
             size="small"
             type="info"
             closable
@@ -429,6 +447,20 @@ const columns = [
           >
             📅 {{ formatTimestamp(logsStore.dateRange[0]) }} → {{ formatTimestamp(logsStore.dateRange[1]) }}
           </NTag>
+
+          <div v-else class="flex items-center gap-1.5">
+            <NTag size="small" type="warning" class="text-[11px]">
+              📅 All Dates (No Filter)
+            </NTag>
+            <NButton
+              size="tiny"
+              quaternary
+              type="primary"
+              @click="() => handleDateRangeChange(getTodayRange())"
+            >
+              Filter Today Only
+            </NButton>
+          </div>
 
           <NTag
             v-if="selectedProvider && selectedProvider !== 'all'"
