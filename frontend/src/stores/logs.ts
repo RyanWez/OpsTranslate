@@ -62,7 +62,10 @@ export const useLogsStore = defineStore('logs', () => {
   }
 
   function addLiveLog(item: UsageLogItem): void {
-    if (!logs.value.some((l) => l.id === item.id)) {
+    const existingIndex = logs.value.findIndex((l) => l.id === item.id)
+    if (existingIndex >= 0) {
+      logs.value[existingIndex] = { ...logs.value[existingIndex], ...item }
+    } else {
       logs.value.unshift(item)
       if (logs.value.length > limit.value) {
         logs.value.pop()

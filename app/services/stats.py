@@ -38,9 +38,18 @@ class Stats:
         if not prov or prov == "unknown":
             prov = "cache" if fields.get("cache_hit") else "Gemini"
 
+        from datetime import datetime, timezone
+        from zoneinfo import ZoneInfo
+
+        now_ts_sec = (now_ts / 1000.0) if now_ts > 1e11 else float(now_ts)
+        mmt = ZoneInfo("Asia/Yangon")
+        mmt_str = datetime.fromtimestamp(now_ts_sec, tz=timezone.utc).astimezone(mmt).strftime("%Y-%m-%d %H:%M:%S")
+        ts_ms = int(now_ts) if now_ts > 1e11 else int(now_ts * 1000)
+        fallback_id = int(time.time() * 1000) + self._log_counter
+
         log_entry = {
-            "id": fields.get("id") or self._log_counter,
-            "timestamp": now_ts,
+            "id": fields.get("id") or fallback_id,
+            "timestamp": ts_ms,
             "user_id": fields.get("user_id", 0),
             "display_name": fields.get("display_name"),
             "username": fields.get("username"),
@@ -49,7 +58,7 @@ class Stats:
             "latency_ms": fields.get("latency_ms", 0),
             "status": norm_status,
             "policy_hits": fields.get("policy_hits") or [],
-            "created_at": fields.get("created_at") or time.strftime("%Y-%m-%d %H:%M:%S"),
+            "created_at": fields.get("created_at") or mmt_str,
         }
         self.recent_logs.appendleft(log_entry)
         try:

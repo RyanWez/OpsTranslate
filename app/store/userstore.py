@@ -35,6 +35,7 @@ class UserStore:
         self._allowed_memo: dict[int, tuple[tuple[bool, str], float]] = {}
         self._target_memo: dict[int, tuple[str, float]] = {}
         self._cap_memo: dict[int, tuple[int, float]] = {}
+        self._last_db_sync: dict[int, float] = {}
 
     # -- memo helpers -------------------------------------------------------
     def _memo_get(self, memo: dict, key: int):
@@ -212,9 +213,11 @@ class UserStore:
         if username:
             username = username.lstrip("@").strip()
 
+        from zoneinfo import ZoneInfo
+        YANGON = ZoneInfo("Asia/Yangon")
         now_dt = datetime.datetime.now(datetime.timezone.utc)
         now_iso = now_dt.isoformat()
-        now_str = now_dt.strftime("%Y-%m-%d %H:%M")
+        now_str = now_dt.astimezone(YANGON).strftime("%Y-%m-%d %H:%M")
         is_admin = user_id in self._seed_admin
         default_role = "admin" if is_admin else "staff"
         default_cap = 500 if is_admin else 200
@@ -240,8 +243,10 @@ class UserStore:
             if full_name:
                 rec["display_name"] = full_name
 
-        # 2. Update/Insert in database if configured
-        if dbmod.is_configured():
+        # 2. Update/Insert in database if configured (throttled to at most once per 60s for existing users)
+        should_db_sync = is_new or ((time.time() - self._last_db_sync.get(user_id, 0)) > 60.0)
+        if dbmod.is_configured() and should_db_sync:
+            self._last_db_sync[user_id] = time.time()
             try:
                 from sqlalchemy import select
                 from .models import AllowedUser

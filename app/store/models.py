@@ -24,8 +24,13 @@ from sqlalchemy.dialects.postgresql import BYTEA, JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
+from zoneinfo import ZoneInfo
+
+YANGON = ZoneInfo("Asia/Yangon")
+
+
 def _utcnow() -> datetime.datetime:
-    return datetime.datetime.now(datetime.timezone.utc)
+    return datetime.datetime.now(YANGON)
 
 
 class Base(DeclarativeBase):

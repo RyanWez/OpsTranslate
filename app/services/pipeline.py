@@ -410,26 +410,33 @@ async def log_usage(services: Services, **fields) -> None:
         except Exception:
             pass
 
+    from ..store import db as dbmod
+    from ..store.models import UsageLog
+
+    if dbmod.is_configured():
+        try:
+            db_fields = {k: v for k, v in fields.items() if k not in ("display_name", "username", "id")}
+            if "status" in db_fields and db_fields["status"] is not None:
+                db_fields["status"] = str(db_fields["status"])
+            async with dbmod.session() as sess:
+                usage_obj = UsageLog(**db_fields)
+                sess.add(usage_obj)
+                await sess.commit()
+                await sess.refresh(usage_obj)
+                fields["id"] = usage_obj.id
+                if usage_obj.ts:
+                    from zoneinfo import ZoneInfo
+                    mmt = ZoneInfo("Asia/Yangon")
+                    fields["created_at"] = usage_obj.ts.astimezone(mmt).strftime("%Y-%m-%d %H:%M:%S")
+                    fields["timestamp"] = int(usage_obj.ts.timestamp() * 1000)
+        except Exception as exc:  # noqa: BLE001 - logging must never break the flow
+            log.warning("usage_log_failed: %s", exc)
+
     # Always record into in-memory ring buffer so admin logs view has telemetry
     try:
         services.stats.record_usage_log(fields)
     except Exception:
         pass
-
-    from ..store import db as dbmod
-    from ..store.models import UsageLog
-
-    if not dbmod.is_configured():
-        return
-    try:
-        db_fields = {k: v for k, v in fields.items() if k not in ("display_name", "username")}
-        if "status" in db_fields and db_fields["status"] is not None:
-            db_fields["status"] = str(db_fields["status"])
-        async with dbmod.session() as sess:
-            sess.add(UsageLog(**db_fields))
-            await sess.commit()
-    except Exception as exc:  # noqa: BLE001 - logging must never break the flow
-        log.warning("usage_log_failed: %s", exc)
 
 
 def _text_hash(text: str) -> str:

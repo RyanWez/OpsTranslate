@@ -44,6 +44,19 @@ from .auth import (
     verify_password,
 )
 
+from zoneinfo import ZoneInfo
+
+YANGON = ZoneInfo("Asia/Yangon")
+
+
+def to_mmt_str(dt: datetime.datetime | None, fmt: str = "%Y-%m-%d %H:%M:%S") -> str | None:
+    if not dt:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=datetime.timezone.utc)
+    return dt.astimezone(YANGON).strftime(fmt)
+
+
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 
@@ -186,7 +199,7 @@ async def get_overview(request: Request):
         "circuit_states": breakers,
         "active_provider_count": len(services.router.providers),
         "today_spend_usd": round(today_spend, 4),
-        "server_time": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "server_time": datetime.datetime.now(YANGON).strftime("%Y-%m-%d %H:%M:%S"),
         "telemetry": telemetry,
     }
 
@@ -707,8 +720,8 @@ async def list_users(request: Request):
                         "role": r.role,
                         "daily_soft_cap": r.daily_soft_cap,
                         "active": r.active,
-                        "last_active_at": r.last_active_at.isoformat() if r.last_active_at else None,
-                        "created_at": r.created_at.strftime("%Y-%m-%d %H:%M") if r.created_at else None,
+                        "last_active_at": r.last_active_at.astimezone(YANGON).isoformat() if r.last_active_at else None,
+                        "created_at": to_mmt_str(r.created_at, "%Y-%m-%d %H:%M"),
                     })
         except Exception:
             pass
@@ -774,8 +787,8 @@ async def add_or_update_user(payload: UserPayload, request: Request):
                 "role": payload.role,
                 "daily_soft_cap": payload.daily_soft_cap,
                 "active": payload.active,
-                "last_active_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                "created_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M"),
+                "last_active_at": datetime.datetime.now(YANGON).isoformat(),
+                "created_at": datetime.datetime.now(YANGON).strftime("%Y-%m-%d %H:%M"),
             }
             services.user_store.invalidate(payload.user_id)
             broadcaster.broadcast("users_changed", {"action": "save", "user_id": payload.user_id})
@@ -1030,8 +1043,15 @@ async def get_logs(
             prov = "cache" if raw.get("cache_hit") else "default"
         uid = raw.get("user_id", 0)
         u_info = user_names.get(uid, {})
+        raw_ts = raw.get("timestamp")
+        created_at = raw.get("created_at")
+        if raw_ts is not None and not created_at:
+            ts_sec = raw_ts / 1000.0 if raw_ts > 1e11 else float(raw_ts)
+            created_at = datetime.datetime.fromtimestamp(ts_sec, tz=datetime.timezone.utc).astimezone(YANGON).strftime("%Y-%m-%d %H:%M:%S")
+        ts_ms = int(raw_ts * 1000) if raw_ts and raw_ts < 1e11 else raw_ts
         return {
             "id": raw.get("id"),
+            "timestamp": ts_ms,
             "user_id": uid,
             "display_name": raw.get("display_name") or u_info.get("display_name"),
             "username": raw.get("username") or u_info.get("username"),
@@ -1040,13 +1060,15 @@ async def get_logs(
             "latency_ms": raw.get("latency_ms", 0),
             "status": norm_status,
             "policy_hits": raw.get("policy_hits") or [],
-            "created_at": raw.get("created_at"),
+            "created_at": created_at,
         }
 
     def _filter_in_memory(items: list[dict]) -> list[dict]:
         out = []
         for raw in items:
             raw_ts = raw.get("timestamp")
+            if raw_ts is not None and raw_ts > 1e11:
+                raw_ts = raw_ts / 1000.0
             if raw_ts is None and raw.get("created_at"):
                 raw_ts = _parse_ts_param(raw.get("created_at"))
             if start_ts is not None and raw_ts is not None and raw_ts < start_ts:
@@ -1084,17 +1106,19 @@ async def get_logs(
             logs = []
             for r in rows:
                 u_info = user_names.get(r.user_id, {})
+                ts_ms = int(r.ts.timestamp() * 1000) if r.ts else None
                 logs.append({
                     "id": r.id,
+                    "timestamp": ts_ms,
                     "user_id": r.user_id,
                     "display_name": u_info.get("display_name"),
                     "username": u_info.get("username"),
                     "char_len": r.char_len,
                     "provider": getattr(r, "provider", None) or ("cache" if getattr(r, "cache_hit", False) else "default"),
                     "latency_ms": r.latency_ms,
-                    "status": 200 if r.status == "ok" else r.status,
+                    "status": 200 if r.status in ("ok", "200") else r.status,
                     "policy_hits": r.policy_hits or [],
-                    "created_at": r.ts.strftime("%Y-%m-%d %H:%M:%S") if r.ts else None,
+                    "created_at": to_mmt_str(r.ts, "%Y-%m-%d %H:%M:%S"),
                 })
             if logs:
                 return {"logs": logs}

@@ -23,6 +23,7 @@ caller's own user id, needed for allowlist seeding).
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from aiogram import Bot, F, Router
@@ -94,12 +95,14 @@ async def _gate_access(
         return False
     else:
         try:
-            if message.from_user:
-                await services.user_store.sync_user_profile(
-                    message.from_user.id,
-                    full_name=message.from_user.full_name,
-                    username=message.from_user.username,
-                    auto_allow=True,
+            if message.from_user and hasattr(services.user_store, "sync_user_profile"):
+                asyncio.create_task(
+                    services.user_store.sync_user_profile(
+                        message.from_user.id,
+                        full_name=message.from_user.full_name,
+                        username=message.from_user.username,
+                        auto_allow=True,
+                    )
                 )
         except Exception:  # noqa: BLE001
             log.warning("user_profile_sync_failed", exc_info=True)
