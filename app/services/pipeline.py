@@ -89,7 +89,10 @@ class Services:
     started_at: float = field(default_factory=time.monotonic)
 
 
-def copy_keyboard(result_text: str) -> InlineKeyboardMarkup:
+def copy_keyboard(result_text: str) -> InlineKeyboardMarkup | None:
+    # Telegram Bot API limit for CopyTextButton: 1-256 characters.
+    if not result_text or len(result_text) > 256:
+        return None
     return InlineKeyboardMarkup(
         inline_keyboard=[
             [
@@ -293,8 +296,22 @@ async def _edit_text(
             disable_web_page_preview=True,
         )
     except Exception as exc:  # noqa: BLE001
-        if "message is not modified" in str(exc).lower():
+        err = str(exc).lower()
+        if "message is not modified" in err:
             return
+        if "button_copy_text_invalid" in err and reply_markup is not None:
+            log.warning("Telegram rejected copy button (%s); retrying without markup", exc)
+            try:
+                await services.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=placeholder_id,
+                    text=text,
+                    reply_markup=None,
+                    disable_web_page_preview=True,
+                )
+                return
+            except Exception:  # noqa: BLE001
+                pass
         raise
 
 

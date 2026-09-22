@@ -373,3 +373,18 @@ async def test_a_corrected_answer_on_retry_is_shipped():
     assert router.calls == 2
     assert "ပမာဏ လွှဲပေး" in bot.last_text()
     assert services.stats.translations_ok == 1
+
+
+def test_copy_keyboard_length_guard():
+    assert pipeline.copy_keyboard("") is None
+    short_text = "Hello world"
+    kb = pipeline.copy_keyboard(short_text)
+    assert kb is not None
+    assert kb.inline_keyboard[0][0].copy_text.text == short_text
+
+    long_text = "a" * 257
+    assert pipeline.copy_keyboard(long_text) is None
+
+    max_text = "a" * 256
+    assert pipeline.copy_keyboard(max_text) is not None
+
