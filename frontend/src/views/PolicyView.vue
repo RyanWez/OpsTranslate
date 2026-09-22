@@ -148,7 +148,7 @@ const columns = [
     </div>
 
     <!-- 4 Stats Cards -->
-    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
       <NCard class="glass-panel border-gray-800 rounded-xl" :bordered="false">
         <div class="text-xs text-gray-400">Protected Concepts</div>
         <div class="text-2xl font-bold text-cyan-400 font-mono mt-1">{{ stats.concepts }}</div>
@@ -181,7 +181,7 @@ const columns = [
           <!-- Tab 1: Concepts Table -->
           <NTabPane name="concepts" tab="Protected Concepts (Layer 2 Masking)">
             <div class="space-y-4 pt-2">
-              <div class="flex items-center gap-4">
+              <div class="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4">
                 <div class="w-full max-w-md">
                   <NInput
                     v-model:value="searchQuery"
@@ -204,6 +204,7 @@ const columns = [
                 :data="filteredConcepts"
                 :row-key="(row) => row.key"
                 :pagination="{ pageSize: 10 }"
+                :scroll-x="750"
               />
             </div>
           </NTabPane>

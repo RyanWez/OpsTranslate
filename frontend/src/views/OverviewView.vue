@@ -247,10 +247,10 @@ const latencyArea = computed(() => {
             </span>
             <span class="text-[11px] text-emerald-400 font-mono">Live (3s sync)</span>
           </div>
-          <div class="flex items-center space-x-4 text-xs">
+          <div class="flex flex-wrap items-center gap-2 sm:gap-4 text-xs">
             <div class="flex items-center space-x-1.5">
               <span class="w-2.5 h-2.5 rounded-full bg-cyan-400"></span>
-              <span class="text-gray-400">Request Throughput:</span>
+              <span class="text-gray-400">Throughput:</span>
               <span class="text-cyan-400 font-mono font-semibold">{{ currentThroughput }} in 5m</span>
             </div>
             <div class="flex items-center space-x-1.5">
@@ -331,11 +331,14 @@ const latencyArea = computed(() => {
           </svg>
         </div>
 
-        <div class="flex justify-between text-[11px] font-mono text-gray-500 mt-2 border-t border-gray-800/60 pt-2">
+        <div class="flex justify-between text-[9px] sm:text-[11px] font-mono text-gray-500 mt-2 border-t border-gray-800/60 pt-2 overflow-x-hidden">
           <span
-            v-for="pt in chartPoints"
+            v-for="(pt, idx) in chartPoints"
             :key="pt.label"
-            :class="pt.label.includes('Live') ? 'text-cyan-400 font-semibold' : ''"
+            :class="[
+              pt.label.includes('Live') ? 'text-cyan-400 font-semibold' : '',
+              idx % 2 !== 0 && idx !== chartPoints.length - 1 ? 'hidden sm:inline' : ''
+            ]"
           >
             {{ pt.label }}
           </span>

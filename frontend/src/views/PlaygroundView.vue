@@ -56,9 +56,9 @@ const dstOptions = [
     <!-- Input Form Card -->
     <NCard class="glass-panel border-gray-800 rounded-xl" :bordered="false">
       <div class="space-y-4">
-        <div class="flex flex-wrap items-center justify-between gap-3">
-          <div class="flex items-center space-x-2">
-            <span class="text-xs text-gray-400">Quick Samples:</span>
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div class="flex flex-wrap items-center gap-1.5">
+            <span class="text-xs text-gray-400 mr-1">Quick Samples:</span>
             <NButton
               v-for="s in sampleInputs"
               :key="s.label"
@@ -70,7 +70,7 @@ const dstOptions = [
             </NButton>
           </div>
 
-          <div class="w-56">
+          <div class="w-full sm:w-56">
             <NSelect
               v-model:value="playgroundStore.dstLang"
               :options="dstOptions"
@@ -89,7 +89,7 @@ const dstOptions = [
           show-count
         />
 
-        <div class="flex justify-between items-center pt-1">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
           <span class="text-[11px] text-gray-500">
             Max limit 500 chars • Evaluates against policy v1 dictionary
           </span>
@@ -97,6 +97,7 @@ const dstOptions = [
             type="primary"
             :loading="playgroundStore.loading"
             @click="playgroundStore.runPipeline"
+            class="w-full sm:w-auto"
           >
             <template #icon>
               <FlaskOutline />
@@ -114,19 +115,17 @@ const dstOptions = [
 
     <!-- Result Flow Visualization -->
     <div v-if="playgroundStore.result" class="space-y-4">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center space-x-2">
-          <span class="text-sm font-semibold text-gray-200">Execution Telemetry</span>
-          <NTag size="small" type="success" class="font-mono text-xs">
-            {{ playgroundStore.result.latency_ms }} ms
-          </NTag>
-          <NTag size="small" type="info" class="font-mono text-xs">
-            Provider: {{ playgroundStore.result.provider_used || 'Active' }}
-          </NTag>
-          <NTag size="small" class="font-mono text-xs uppercase">
-            {{ playgroundStore.result.src_lang }} ➔ {{ playgroundStore.result.dst_lang }}
-          </NTag>
-        </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="text-sm font-semibold text-gray-200">Execution Telemetry</span>
+        <NTag size="small" type="success" class="font-mono text-xs">
+          {{ playgroundStore.result.latency_ms }} ms
+        </NTag>
+        <NTag size="small" type="info" class="font-mono text-xs">
+          Provider: {{ playgroundStore.result.provider_used || 'Active' }}
+        </NTag>
+        <NTag size="small" class="font-mono text-xs uppercase">
+          {{ playgroundStore.result.src_lang }} ➔ {{ playgroundStore.result.dst_lang }}
+        </NTag>
       </div>
 
       <!-- Pipeline 5 Stages Breakdown -->

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, h } from 'vue'
 import { useProvidersStore } from '../stores/providers'
+import { useMobile } from '../composables/useMobile'
 import {
   NCard,
   NButton,
@@ -29,6 +30,7 @@ import type { ProviderItem, ProviderPayload, TestProviderResult } from '../types
 const providersStore = useProvidersStore()
 const message = useMessage()
 const dialog = useDialog()
+const { isMobile } = useMobile()
 
 onMounted(() => {
   providersStore.startLiveSync(3000)
@@ -362,11 +364,12 @@ const columns = [
         :data="providersStore.providers"
         :loading="providersStore.loading"
         :row-key="(row) => row.name"
+        :scroll-x="850"
       />
     </NCard>
 
     <!-- Add / Edit Modal -->
-    <NModal v-model:show="showModal" preset="card" :title="modalTitle" class="max-w-lg glass-panel border-gray-800 rounded-xl">
+    <NModal v-model:show="showModal" preset="card" :title="modalTitle" class="w-[94vw] max-w-lg glass-panel border-gray-800 rounded-xl">
       <div class="mb-4 p-3 rounded-lg bg-gray-900/60 border border-gray-800 space-y-2">
         <span class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">Quick Presets:</span>
         <div class="flex flex-wrap gap-1.5">
@@ -378,7 +381,7 @@ const columns = [
       </div>
 
       <NForm label-placement="top" class="space-y-4">
-        <div class="grid grid-cols-2 gap-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
           <NFormItem label="Provider Identifier" required>
             <NInput v-model:value="formData.name" placeholder="e.g. openai-primary, claude" />
           </NFormItem>
@@ -394,7 +397,7 @@ const columns = [
           </div>
         </NFormItem>
 
-        <div class="grid grid-cols-2 gap-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
           <NFormItem label="Model ID" required>
             <NInput v-model:value="formData.model" placeholder="e.g. gpt-4o-mini" />
           </NFormItem>
@@ -425,7 +428,7 @@ const columns = [
     </NModal>
 
     <!-- Ping Test Drawer -->
-    <NDrawer v-model:show="showTestDrawer" :width="460" placement="right">
+    <NDrawer v-model:show="showTestDrawer" :width="isMobile ? '100%' : 460" placement="right">
       <NDrawerContent :title="`Test Connection: ${testingTarget?.name || ''}`" closable>
         <div class="space-y-4">
           <div class="p-3 rounded-lg bg-gray-900/80 border border-gray-800 text-xs space-y-1 font-mono">

@@ -3,6 +3,7 @@ import { ref, onMounted, onUnmounted, computed, h } from 'vue'
 import { useRouter } from 'vue-router'
 import { useLogsStore } from '../stores/logs'
 import { usePlaygroundStore } from '../stores/playground'
+import { useMobile } from '../composables/useMobile'
 import {
   NCard,
   NButton,
@@ -24,6 +25,7 @@ import type { UsageLogItem } from '../types'
 const router = useRouter()
 const logsStore = useLogsStore()
 const playgroundStore = usePlaygroundStore()
+const { isMobile } = useMobile()
 
 onMounted(() => {
   logsStore.startLiveSync(3000)
@@ -236,14 +238,14 @@ const columns = [
           Sanitized operational telemetry (metadata only — zero message body stored to protect user privacy).
         </p>
       </div>
-      <div class="flex items-center space-x-3">
+      <div class="flex flex-wrap items-center gap-2 sm:gap-3">
         <NButton secondary size="small" @click="exportToCsv" title="Export current filtered view to CSV">
           <template #icon>
             <DownloadOutline />
           </template>
           Export CSV
         </NButton>
-        <div class="w-40">
+        <div class="w-36 sm:w-40">
           <NSelect
             :value="logsStore.limit"
             :options="limitOptions"
@@ -262,8 +264,8 @@ const columns = [
 
     <!-- Filters Bar -->
     <NCard class="glass-panel border-gray-800 rounded-xl" :bordered="false">
-      <div class="flex flex-wrap items-center gap-4">
-        <div class="flex-1 min-w-[240px]">
+      <div class="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
+        <div class="flex-1 w-full">
           <NInput
             v-model:value="searchQuery"
             placeholder="Search by Telegram User ID, Provider, or Policy Concept..."
@@ -276,7 +278,7 @@ const columns = [
           </NInput>
         </div>
 
-        <div class="w-48">
+        <div class="w-full sm:w-48">
           <NSelect
             :options="providerOptions"
             :value="selectedProvider || 'all'"
@@ -295,11 +297,12 @@ const columns = [
         :loading="logsStore.loading"
         :row-key="(row) => row.id"
         :pagination="{ pageSize: 15 }"
+        :scroll-x="900"
       />
     </NCard>
 
     <!-- Detail Drawer -->
-    <NDrawer v-model:show="showDetailDrawer" :width="440" placement="right">
+    <NDrawer v-model:show="showDetailDrawer" :width="isMobile ? '100%' : 440" placement="right">
       <NDrawerContent title="Telemetry Log Inspector" closable>
         <div v-if="selectedLog" class="space-y-5 text-xs">
           <div class="p-3.5 rounded-xl bg-gray-900/90 border border-gray-800 space-y-2">

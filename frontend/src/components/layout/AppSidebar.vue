@@ -53,13 +53,22 @@ const menuOptions = [
   },
 ]
 
+withDefaults(defineProps<{ isMobile?: boolean }>(), { isMobile: false })
+const emit = defineEmits<{ (e: 'navigate', key: string): void }>()
+
 function handleUpdateValue(key: string) {
   router.push({ name: key })
+  emit('navigate', key)
 }
 </script>
 
 <template>
-  <aside class="w-64 border-r border-gray-800 bg-[#0d1322]/90 flex flex-col justify-between p-3 select-none">
+  <aside
+    :class="[
+      'flex flex-col justify-between p-3 select-none h-full',
+      isMobile ? 'w-full bg-[#0d1322]' : 'w-64 border-r border-gray-800 bg-[#0d1322]/90'
+    ]"
+  >
     <div class="space-y-1">
       <div class="px-3 py-2 text-[11px] font-semibold tracking-wider text-gray-500 uppercase">
         Navigation

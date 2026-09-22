@@ -209,7 +209,7 @@ const columns = [
         <h1 class="text-2xl font-bold text-gray-100 tracking-tight">Staff & Access Control</h1>
         <p class="text-xs text-gray-400 mt-0.5">Allowlist Telegram user IDs, manage roles, and enforce daily soft quota caps.</p>
       </div>
-      <div class="flex items-center space-x-3">
+      <div class="flex items-center space-x-2 sm:space-x-3">
         <NButton secondary size="small" @click="() => usersStore.fetchUsers()" :loading="usersStore.loading">
           <template #icon>
             <RefreshOutline />
@@ -232,11 +232,12 @@ const columns = [
         :data="usersStore.users"
         :loading="usersStore.loading"
         :row-key="(row) => row.user_id"
+        :scroll-x="700"
       />
     </NCard>
 
     <!-- Add/Edit Modal -->
-    <NModal v-model:show="showModal" preset="card" :title="modalTitle" class="max-w-md glass-panel border-gray-800 rounded-xl">
+    <NModal v-model:show="showModal" preset="card" :title="modalTitle" class="w-[94vw] max-w-md glass-panel border-gray-800 rounded-xl">
       <NForm label-placement="top" class="space-y-4">
         <NFormItem label="Telegram User ID" required>
           <NInputNumber
@@ -252,7 +253,7 @@ const columns = [
           <NInput v-model:value="formData.display_name" placeholder="e.g. John Doe (Support Lead)" />
         </NFormItem>
 
-        <div class="grid grid-cols-2 gap-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
           <NFormItem label="Role" required>
             <NSelect v-model:value="formData.role" :options="roleOptions" />
           </NFormItem>
