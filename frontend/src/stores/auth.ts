@@ -32,6 +32,9 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const res = await api.login(password)
       if (res.data.ok) {
+        if (res.data.token) {
+          localStorage.setItem('admin_token', res.data.token)
+        }
         isAuthenticated.value = true
         await checkAuth()
         return true
@@ -46,6 +49,7 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       await api.logout()
     } finally {
+      localStorage.removeItem('admin_token')
       isAuthenticated.value = false
       window.location.href = '/admin/login'
     }
