@@ -252,6 +252,8 @@ async def cmd_tr(message: Message, services: Services, bot: Bot) -> None:
             raw_text=rtext,
             anchor_message_id=replied.message_id,
             dst=dst,
+            username=message.from_user.username,
+            display_name=message.from_user.full_name,
         )
         return
 
@@ -265,6 +267,8 @@ async def cmd_tr(message: Message, services: Services, bot: Bot) -> None:
             raw_text=rest,
             anchor_message_id=message.message_id,
             dst=dst,
+            username=message.from_user.username,
+            display_name=message.from_user.full_name,
         )
         return
 
@@ -341,6 +345,8 @@ async def on_text(message: Message, services: Services, bot: Bot) -> None:
         raw_text=text,
         anchor_message_id=message.message_id,
         dst=dst,
+        username=message.from_user.username,
+        display_name=message.from_user.full_name,
     )
 
 

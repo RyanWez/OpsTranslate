@@ -187,6 +187,7 @@ async def translate_policied(
             "policy_hits": [],
             "deny_hits": 0,
             "ratio": round(len(final) / max(len(text), 1), 2),
+            "masked_text": protected,
         }
 
     # -- Full policy path: Myanmar -> EN (and en->en / zh->en etc.) -------
@@ -249,6 +250,7 @@ async def translate_policied(
         "policy_hits": fired,
         "deny_hits": 0,
         "ratio": round(len(final) / max(len(text), 1), 2),
+        "masked_text": masked,
     }
 
 
@@ -439,6 +441,98 @@ async def log_usage(services: Services, **fields) -> None:
         pass
 
 
+async def record_translation_history(
+    services: Services,
+    *,
+    user_id: int,
+    username: str | None = None,
+    display_name: str | None = None,
+    src_lang: str,
+    dst_lang: str,
+    input_text: str,
+    masked_text: str | None = None,
+    output_text: str,
+    provider: str | None = None,
+    latency_ms: int = 0,
+    char_len: int = 0,
+    policy_hits: list[str] | None = None,
+    status: str = "200 OK",
+    error_code: str | None = None,
+) -> None:
+    """Asynchronously record full translation audit trail and broadcast live update."""
+    from ..store import db as dbmod
+    from ..store.models import TranslationHistory
+
+    if not dbmod.is_configured():
+        return
+
+    # Fallback user lookup if display_name/username were not provided
+    if user_id and not display_name:
+        try:
+            if hasattr(services.user_store, "_discovered_users") and user_id in services.user_store._discovered_users:
+                u = services.user_store._discovered_users[user_id]
+                display_name = u.get("display_name")
+                username = u.get("username") or username
+            elif hasattr(services.user_store, "_seed_admin") and user_id in services.user_store._seed_admin:
+                display_name = "Admin (Env)"
+            elif hasattr(services.user_store, "_seed_staff") and user_id in services.user_store._seed_staff:
+                display_name = "Staff (Env)"
+        except Exception:
+            pass
+
+    try:
+        async with dbmod.session() as sess:
+            item = TranslationHistory(
+                user_id=user_id,
+                username=username,
+                display_name=display_name,
+                src_lang=src_lang,
+                dst_lang=dst_lang,
+                input_text=input_text,
+                masked_text=masked_text,
+                output_text=output_text,
+                provider=provider,
+                latency_ms=latency_ms,
+                char_len=char_len or len(input_text),
+                policy_hits=policy_hits or [],
+                status=status,
+                error_code=error_code,
+            )
+            sess.add(item)
+            await sess.commit()
+            await sess.refresh(item)
+
+            # Broadcast SSE event for real-time dashboard updates
+            try:
+                from ..admin.sse import broadcaster
+                from zoneinfo import ZoneInfo
+                mmt = ZoneInfo("Asia/Yangon")
+                payload = {
+                    "id": item.id,
+                    "timestamp": int(item.ts.timestamp() * 1000) if item.ts else int(time.time() * 1000),
+                    "created_at": item.ts.astimezone(mmt).strftime("%Y-%m-%d %H:%M:%S") if item.ts else "",
+                    "user_id": item.user_id,
+                    "username": item.username,
+                    "display_name": item.display_name,
+                    "src_lang": item.src_lang,
+                    "dst_lang": item.dst_lang,
+                    "input_text": item.input_text,
+                    "masked_text": item.masked_text,
+                    "output_text": item.output_text,
+                    "provider": item.provider,
+                    "latency_ms": item.latency_ms,
+                    "char_len": item.char_len,
+                    "policy_hits": item.policy_hits or [],
+                    "status": item.status,
+                    "error_code": item.error_code,
+                }
+                broadcaster.broadcast("translation_history_new", payload)
+            except Exception:
+                pass
+    except Exception as exc:
+        log.warning("translation_history_record_failed: %s", exc)
+
+
 def _text_hash(text: str) -> str:
     return hashlib.sha1(text.encode("utf-8")).hexdigest()[:16]
 
@@ -448,16 +542,7 @@ def _text_hash(text: str) -> str:
 # ---------------------------------------------------------------------------
 
 def resolve_toggle_dst(src: str, dst: str) -> str:
-    """Global => Myanmar | Myanmar => EN (2026-09-20).
-
-    The product direction is now: Myanmar input always goes to English
-    (with full term-policy), everything else (English, auto, Chinese,
-    Thai, any global language the model knows) always goes to Myanmar
-    (relaxed, literal, natural). This replaces the old EN<->MY toggle.
-    The stored user target is kept only as a fallback for the rare
-    case src == "my" is uncertain, but my->en / non-my->my is the
-    canonical rule.
-    """
+    """Global => Myanmar | Myanmar => EN (2026-09-20)."""
     if src == "my":
         return "en"
     return "my"
@@ -471,6 +556,8 @@ async def run_translation(
     raw_text: str,
     anchor_message_id: int,
     dst: str,
+    username: str | None = None,
+    display_name: str | None = None,
 ) -> None:
     """Translate *raw_text* to *dst* and deliver it. Gates 3-10.
 
@@ -579,6 +666,24 @@ async def run_translation(
                 text_hash=_text_hash(raw_text), char_len=len(raw_text),
                 provider="cache", cache_hit=True, latency_ms=int((time.monotonic() - t0) * 1000),
                 policy_version=services.policy.version, status="200",
+            )
+            asyncio.create_task(
+                record_translation_history(
+                    services,
+                    user_id=user_id,
+                    username=username,
+                    display_name=display_name,
+                    src_lang=src,
+                    dst_lang=dst,
+                    input_text=raw_text,
+                    masked_text=None,
+                    output_text=cached.text,
+                    provider="cache",
+                    latency_ms=int((time.monotonic() - t0) * 1000),
+                    char_len=len(raw_text),
+                    policy_hits=[],
+                    status="200 OK",
+                )
             )
             return
 
@@ -704,6 +809,24 @@ async def run_translation(
             policy_version=services.policy.version,
             policy_hits=meta.get("policy_hits") or [], deny_hits=meta.get("deny_hits"),
             ratio=meta.get("ratio"), status="200",
+        )
+        asyncio.create_task(
+            record_translation_history(
+                services,
+                user_id=user_id,
+                username=username,
+                display_name=display_name,
+                src_lang=src,
+                dst_lang=dst,
+                input_text=raw_text,
+                masked_text=meta.get("masked_text"),
+                output_text=result,
+                provider=provider_name,
+                latency_ms=int((time.monotonic() - t0) * 1000),
+                char_len=len(raw_text),
+                policy_hits=meta.get("policy_hits") or [],
+                status="200 OK",
+            )
         )
     finally:
         await services.cache.clear_inflight(dup)

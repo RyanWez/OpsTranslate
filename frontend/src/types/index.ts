@@ -131,3 +131,31 @@ export interface PolicyData {
   concepts: PolicyConcept[]
   deny_terms: Record<string, string[]>
 }
+
+export interface TranslationHistoryItem {
+  id: number
+  timestamp?: number | null
+  created_at: string
+  user_id: number
+  username?: string | null
+  display_name?: string | null
+  src_lang: string
+  dst_lang: string
+  input_text: string
+  masked_text?: string | null
+  output_text: string
+  provider?: string | null
+  latency_ms?: number | null
+  char_len?: number | null
+  policy_hits: string[]
+  status?: string | null
+  error_code?: string | null
+}
+
+export interface TranslationHistoryResponse {
+  items: TranslationHistoryItem[]
+  total: number
+  page: number
+  page_size: number
+  total_pages: number
+}

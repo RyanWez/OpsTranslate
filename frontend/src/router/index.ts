@@ -9,6 +9,7 @@ import UsersView from '../views/UsersView.vue'
 import PlaygroundView from '../views/PlaygroundView.vue'
 import LogsView from '../views/LogsView.vue'
 import PolicyView from '../views/PolicyView.vue'
+import HistoryView from '../views/HistoryView.vue'
 
 const routes: RouteRecordRaw[] = [
   {
@@ -46,6 +47,11 @@ const routes: RouteRecordRaw[] = [
         path: 'playground',
         name: 'playground',
         component: PlaygroundView,
+      },
+      {
+        path: 'history',
+        name: 'history',
+        component: HistoryView,
       },
       {
         path: 'logs',

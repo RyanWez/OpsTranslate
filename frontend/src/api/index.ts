@@ -10,6 +10,8 @@ import type {
   PlaygroundResult,
   UsageLogItem,
   PolicyData,
+  TranslationHistoryItem,
+  TranslationHistoryResponse,
 } from '../types'
 
 export const api = {
@@ -63,4 +65,20 @@ export const api = {
     }
     return apiClient.get<{ logs: UsageLogItem[] }>('/logs', { params })
   },
+
+  // Translation History & Staff Audits
+  getHistory: (params?: {
+    page?: number
+    page_size?: number
+    user_id?: number
+    search?: string
+    start_time?: number
+    end_time?: number
+    provider?: string
+    status?: string
+    src_lang?: string
+    dst_lang?: string
+  }) => apiClient.get<TranslationHistoryResponse>('/history', { params }),
+  getHistoryDetail: (id: number) => apiClient.get<TranslationHistoryItem>(`/history/${id}`),
+  pruneHistory: (days = 30) => apiClient.delete<{ ok: boolean; deleted_count: number }>('/history/prune', { params: { days } }),
 }

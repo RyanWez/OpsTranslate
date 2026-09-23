@@ -7,6 +7,7 @@ import {
   FlashOutline,
   PeopleOutline,
   FlaskOutline,
+  ChatboxEllipsesOutline,
   DocumentTextOutline,
   ShieldCheckmarkOutline,
 } from '@vicons/ionicons5'
@@ -45,6 +46,11 @@ const menuOptions = [
     label: 'Pipeline Playground',
     key: 'playground',
     icon: renderIcon(FlaskOutline),
+  },
+  {
+    label: 'Translation History',
+    key: 'history',
+    icon: renderIcon(ChatboxEllipsesOutline),
   },
   {
     label: 'Audit Logs',

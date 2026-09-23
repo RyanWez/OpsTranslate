@@ -4,7 +4,8 @@ import { useProvidersStore } from './providers'
 import { useLogsStore } from './logs'
 import { useOverviewStore } from './overview'
 import { useUsersStore } from './users'
-import type { UsageLogItem, TelemetryData } from '../types'
+import { useHistoryStore } from './history'
+import type { UsageLogItem, TelemetryData, TranslationHistoryItem } from '../types'
 
 export const useRealtimeStore = defineStore('realtime', () => {
   const isConnected = ref<boolean>(false)
@@ -75,6 +76,18 @@ export const useRealtimeStore = defineStore('realtime', () => {
           logsStore.addLiveLog(item)
         } catch (err) {
           console.error('SSE usage_log parse error', err)
+        }
+      })
+
+      eventSource.addEventListener('translation_history_new', (e: MessageEvent) => {
+        lastEventTime.value = new Date().toLocaleTimeString()
+        try {
+          const payload = JSON.parse(e.data)
+          const item: TranslationHistoryItem = payload.data || payload
+          const historyStore = useHistoryStore()
+          historyStore.addLiveHistory(item)
+        } catch (err) {
+          console.error('SSE translation_history_new parse error', err)
         }
       })
 

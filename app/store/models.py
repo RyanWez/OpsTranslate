@@ -249,3 +249,32 @@ class Setting(Base):
     updated_at: Mapped[datetime.datetime] = mapped_column(
         DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
     )
+
+
+class TranslationHistory(Base):
+    """Full message translation audit trail for staff operations supervision."""
+
+    __tablename__ = "translation_history"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    ts: Mapped[datetime.datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, index=True
+    )
+    user_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    username: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
+    display_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    src_lang: Mapped[str] = mapped_column(String(8), default="auto")
+    dst_lang: Mapped[str] = mapped_column(String(8), default="en")
+    input_text: Mapped[str] = mapped_column(Text)
+    masked_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    output_text: Mapped[str] = mapped_column(Text)
+    provider: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
+    latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    char_len: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    policy_hits: Mapped[list | None] = mapped_column(JSONType, nullable=True)
+    status: Mapped[str | None] = mapped_column(String(32), default="200 OK")
+    error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+Index("ix_translation_history_user_ts", TranslationHistory.user_id, TranslationHistory.ts.desc())
+Index("ix_translation_history_ts_desc", TranslationHistory.ts.desc())

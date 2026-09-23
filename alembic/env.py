@@ -21,9 +21,18 @@ target_metadata = Base.metadata
 
 
 def _db_url() -> str:
-    url = os.environ.get("DATABASE_URL", "")
+    import urllib.parse
+    from app import config
+
+    url = config.DATABASE_URL or os.environ.get("DATABASE_URL", "")
     if url.startswith("postgresql://"):
         url = "postgresql+psycopg://" + url[len("postgresql://"):]
+    if url:
+        parsed = urllib.parse.urlparse(url)
+        query_params = urllib.parse.parse_qs(parsed.query)
+        query_params.pop("pgbouncer", None)
+        new_query = urllib.parse.urlencode({k: v[0] for k, v in query_params.items()})
+        url = urllib.parse.urlunparse(parsed._replace(query=new_query))
     # Fallback lets `alembic revision --autogenerate` run without a DB.
     return url or "postgresql+psycopg://localhost/opstranslate"
 

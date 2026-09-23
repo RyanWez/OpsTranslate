@@ -38,10 +38,11 @@ def get_engine():
         parsed = urllib.parse.urlparse(url)
         query_params = urllib.parse.parse_qs(parsed.query)
         connect_args = {}
-        if "sslmode" in query_params or "ssl" in query_params:
+        if "sslmode" in query_params or "ssl" in query_params or (parsed.hostname and "supabase" in parsed.hostname):
             connect_args["ssl"] = "require"
         query_params.pop("sslmode", None)
         query_params.pop("channel_binding", None)
+        query_params.pop("pgbouncer", None)
         new_query = urllib.parse.urlencode({k: v[0] for k, v in query_params.items()})
         cleaned_url = urllib.parse.urlunparse(parsed._replace(query=new_query))
 

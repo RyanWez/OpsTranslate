@@ -7,7 +7,7 @@ import time
 from typing import Any, Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, Field
 
 from .. import config
@@ -25,7 +25,7 @@ from ..policy.policy import (
 from ..services.pipeline import Services, resolve_toggle_dst
 from ..services.provider import Provider as ServiceProvider
 from ..store import db as dbmod
-from ..store.models import AllowedUser, Provider as DBProvider, UsageLog
+from ..store.models import AllowedUser, Provider as DBProvider, UsageLog, TranslationHistory
 from ..store.providers import (
     get_active_service_providers,
     sync_router_providers,
@@ -1050,5 +1050,167 @@ async def get_logs(
             return {"logs": _filter_in_memory(list(services.stats.recent_logs))}
     except Exception:
         return {"logs": _filter_in_memory(list(services.stats.recent_logs))}
+
+
+# ---- Translation History & Staff Audits -----------------------------------
+
+@router.get("/history", dependencies=[Depends(require_admin)])
+async def get_translation_history(
+    request: Request,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    user_id: int | None = Query(default=None),
+    search: str | None = Query(default=None),
+    start_time: int | None = Query(default=None),
+    end_time: int | None = Query(default=None),
+    provider: str | None = Query(default=None),
+    status: str | None = Query(default=None),
+    src_lang: str | None = Query(default=None),
+    dst_lang: str | None = Query(default=None),
+):
+    """Paginated translation history for staff operations audits."""
+    if not dbmod.is_configured():
+        return {"items": [], "total": 0, "page": page, "page_size": page_size, "total_pages": 0}
+
+    import math
+    from datetime import datetime, timezone
+    from sqlalchemy import select, func, or_
+    from zoneinfo import ZoneInfo
+    mmt = ZoneInfo("Asia/Yangon")
+
+    try:
+        async with dbmod.session() as sess:
+            query = select(TranslationHistory)
+
+            # Filters
+            if user_id:
+                query = query.where(TranslationHistory.user_id == user_id)
+            if start_time is not None:
+                query = query.where(TranslationHistory.ts >= datetime.fromtimestamp(start_time / 1000.0, tz=timezone.utc))
+            if end_time is not None:
+                query = query.where(TranslationHistory.ts <= datetime.fromtimestamp(end_time / 1000.0, tz=timezone.utc))
+            if provider and provider != "all":
+                query = query.where(TranslationHistory.provider.ilike(f"%{provider}%"))
+            if status and status != "all":
+                query = query.where(TranslationHistory.status == status)
+            if src_lang:
+                query = query.where(TranslationHistory.src_lang == src_lang)
+            if dst_lang:
+                query = query.where(TranslationHistory.dst_lang == dst_lang)
+            if search and search.strip():
+                kw = f"%{search.strip()}%"
+                query = query.where(
+                    or_(
+                        TranslationHistory.input_text.ilike(kw),
+                        TranslationHistory.output_text.ilike(kw),
+                        TranslationHistory.username.ilike(kw),
+                        TranslationHistory.display_name.ilike(kw),
+                    )
+                )
+
+            # Count total
+            count_stmt = select(func.count()).select_from(query.subquery())
+            total = await sess.scalar(count_stmt) or 0
+
+            # Order & pagination
+            offset = (page - 1) * page_size
+            items_stmt = query.order_by(TranslationHistory.ts.desc()).offset(offset).limit(page_size)
+            result = await sess.execute(items_stmt)
+            rows = result.scalars().all()
+
+            items = []
+            for r in rows:
+                items.append({
+                    "id": r.id,
+                    "timestamp": int(r.ts.timestamp() * 1000) if r.ts else None,
+                    "created_at": r.ts.astimezone(mmt).strftime("%Y-%m-%d %H:%M:%S") if r.ts else "",
+                    "user_id": r.user_id,
+                    "username": r.username,
+                    "display_name": r.display_name,
+                    "src_lang": r.src_lang,
+                    "dst_lang": r.dst_lang,
+                    "input_text": r.input_text,
+                    "masked_text": r.masked_text,
+                    "output_text": r.output_text,
+                    "provider": r.provider,
+                    "latency_ms": r.latency_ms,
+                    "char_len": r.char_len,
+                    "policy_hits": r.policy_hits or [],
+                    "status": r.status,
+                    "error_code": r.error_code,
+                })
+
+            total_pages = math.ceil(total / page_size) if total > 0 else 0
+            return {
+                "items": items,
+                "total": total,
+                "page": page,
+                "page_size": page_size,
+                "total_pages": total_pages,
+            }
+    except Exception as exc:
+        log.warning("failed_to_fetch_translation_history: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Database error fetching history: {exc}")
+
+
+@router.get("/history/{history_id}", dependencies=[Depends(require_admin)])
+async def get_history_detail(history_id: int):
+    """Retrieve full audit detail for a specific translation."""
+    if not dbmod.is_configured():
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    from zoneinfo import ZoneInfo
+    mmt = ZoneInfo("Asia/Yangon")
+
+    try:
+        async with dbmod.session() as sess:
+            item = await sess.get(TranslationHistory, history_id)
+            if not item:
+                raise HTTPException(status_code=404, detail="Translation history record not found")
+            return {
+                "id": item.id,
+                "timestamp": int(item.ts.timestamp() * 1000) if item.ts else None,
+                "created_at": item.ts.astimezone(mmt).strftime("%Y-%m-%d %H:%M:%S") if item.ts else "",
+                "user_id": item.user_id,
+                "username": item.username,
+                "display_name": item.display_name,
+                "src_lang": item.src_lang,
+                "dst_lang": item.dst_lang,
+                "input_text": item.input_text,
+                "masked_text": item.masked_text,
+                "output_text": item.output_text,
+                "provider": item.provider,
+                "latency_ms": item.latency_ms,
+                "char_len": item.char_len,
+                "policy_hits": item.policy_hits or [],
+                "status": item.status,
+                "error_code": item.error_code,
+            }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.delete("/history/prune", dependencies=[Depends(require_admin)])
+async def prune_translation_history(days: int = Query(default=30, ge=1)):
+    """Prune translation history records older than given days to conserve database storage."""
+    if not dbmod.is_configured():
+        raise HTTPException(status_code=500, detail="Database not configured")
+
+    from datetime import datetime, timedelta, timezone
+    from sqlalchemy import delete
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    try:
+        async with dbmod.session() as sess:
+            stmt = delete(TranslationHistory).where(TranslationHistory.ts < cutoff)
+            res = await sess.execute(stmt)
+            await sess.commit()
+            deleted_count = res.rowcount
+            return {"ok": True, "deleted_count": deleted_count, "cutoff": cutoff.isoformat()}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Prune failed: {exc}")
+
 
 
