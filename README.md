@@ -90,13 +90,10 @@ cp .env.example .env
 Key environment variables:
 ```env
 BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz
-PROVIDER_BASE_URL=https://api.openai.com/v1
-PROVIDER_API_KEY=sk-proj-...
-PROVIDER_MODEL=gpt-4o-mini
+DATABASE_URL=postgresql://...  # REQUIRED: providers live in DB, managed via /admin Providers page
+REDIS_URL=redis://...          # Optional: Redis connection string
 MODE=polling                   # polling for local test, webhook for production
 ADMIN_PASSWORD=strong_password # password for /admin dashboard
-DATABASE_URL=postgresql://...  # Optional: Neon or Postgres connection string
-REDIS_URL=redis://...          # Optional: Redis connection string
 ```
 
 ### 4. Database Setup & Seeding

@@ -58,19 +58,10 @@ ALLOWED_UPDATES = ["message", "callback_query", "chat_member", "my_chat_member"]
 
 def build_services(bot: Bot) -> Services:
     policy = compile_policy(config.POLICY_VERSION)
-    providers = []
-    for d in config.provider_defs():
-        providers.append(
-            Provider(
-                name=d.get("name", "primary"),
-                base_url=(d.get("base_url") or "").rstrip("/"),
-                api_key=d.get("api_key") or "",
-                model=d.get("model") or "",
-                priority=int(d.get("priority", 1)),
-                enabled=bool(d.get("enabled", True)),
-                timeout_s=float(d.get("timeout_s", config.PROVIDER_TIMEOUT_S)),
-            )
-        )
+    # Providers are DB-only (Admin Panel is the source of truth). The router
+    # starts empty and is populated from the DB by sync_router_providers()
+    # during lifespan startup; lifespan logs loudly if that yields zero.
+    providers: list[Provider] = []
     alerts = AlertManager(config.ALERT_BOT_TOKEN, config.ADMIN_CHAT_ID)
     cache = Cache(config.REDIS_URL, alerts=alerts)
     router = ProviderRouter(
@@ -123,10 +114,18 @@ async def lifespan(app: FastAPI):
     app.state.dp = dp
     app.state.bot = bot
 
-    # Initial DB sync for dynamic providers if available
+    # Providers are DB-only: sync the router from the DB (Admin Panel data).
+    # Zero providers after sync = hard misconfiguration (admin added none,
+    # or DB unreachable) - loud error so it shows in fly logs, not silent.
     try:
         from .store.providers import sync_router_providers
-        await sync_router_providers(services.router)
+        active = await sync_router_providers(services.router)
+        if not active:
+            log.error(
+                "NO PROVIDERS CONFIGURED: the providers table is empty and "
+                "DB-only mode has no env fallback. Add providers via the "
+                "/admin Providers page, otherwise every translation fails."
+            )
     except Exception:
         log.warning("initial_provider_sync_failed", exc_info=True)
 

@@ -28,8 +28,6 @@ from ..store import db as dbmod
 from ..store.models import AllowedUser, Provider as DBProvider, UsageLog
 from ..store.providers import (
     get_active_service_providers,
-    load_stored_providers,
-    save_stored_providers,
     sync_router_providers,
 )
 from fastapi.responses import StreamingResponse
@@ -349,227 +347,161 @@ def _mask_key(key: str) -> str:
 
 @router.get("/providers", dependencies=[Depends(require_admin)])
 async def list_providers(request: Request):
+    """List providers. DB-only - Admin Panel is the source of truth."""
     services: Services = request.app.state.services
     breaker_states = services.router.states()
-    out = []
 
-    if dbmod.is_configured():
-        try:
-            from sqlalchemy import select
+    if not dbmod.is_configured():
+        raise HTTPException(
+            status_code=500,
+            detail="DATABASE_URL is not configured - providers live in DB (managed via /admin).",
+        )
+    try:
+        from sqlalchemy import select
 
-            async with dbmod.session() as sess:
-                result = await sess.execute(select(DBProvider).order_by(DBProvider.priority.asc(), DBProvider.id.asc()))
-                rows = result.scalars().all()
-                for row in rows:
-                    out.append({
-                        "id": row.id,
-                        "name": row.name,
-                        "base_url": row.base_url,
-                        "api_key_masked": _mask_key(row.api_key),
-                        "model": row.model,
-                        "priority": row.priority,
-                        "enabled": row.enabled,
-                        "timeout_s": float(row.timeout_ms / 1000.0) if row.timeout_ms else 15.0,
-                        "breaker_state": breaker_states.get(row.name, "unknown"),
-                        "source": "database",
-                    })
-                return {"providers": out}
-        except Exception as exc:
-            log.warning("failed to load providers from db: %s", exc)
-
-    # Persistent local storage (data/providers.json)
-    stored = load_stored_providers()
-    for d in stored:
-        b_state = breaker_states.get(d["name"], "closed" if d.get("enabled", True) else "paused")
-        out.append({
-            "id": d["id"],
-            "name": d["name"],
-            "base_url": d["base_url"],
-            "api_key_masked": _mask_key(d.get("api_key", "")),
-            "model": d["model"],
-            "priority": d.get("priority", 1),
-            "enabled": d.get("enabled", True),
-            "timeout_s": d.get("timeout_s", 15.0),
-            "breaker_state": b_state,
-            "source": "persisted",
-        })
-    return {"providers": out}
+        async with dbmod.session() as sess:
+            result = await sess.execute(select(DBProvider).order_by(DBProvider.priority.asc(), DBProvider.id.asc()))
+            rows = result.scalars().all()
+            out = []
+            for row in rows:
+                out.append({
+                    "id": row.id,
+                    "name": row.name,
+                    "base_url": row.base_url,
+                    "api_key_masked": _mask_key(row.api_key),
+                    "model": row.model,
+                    "priority": row.priority,
+                    "enabled": row.enabled,
+                    "timeout_s": float(row.timeout_ms / 1000.0) if row.timeout_ms else 15.0,
+                    "breaker_state": breaker_states.get(row.name, "paused" if not row.enabled else "unknown"),
+                    "source": "database",
+                })
+            return {"providers": out}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        log.warning("failed to load providers from db: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Database error loading providers: {exc}")
 
 
 @router.post("/providers", dependencies=[Depends(require_admin)])
 async def create_provider(payload: ProviderPayload, request: Request):
+    """Create a provider. DB-only - Admin Panel is the source of truth."""
     services: Services = request.app.state.services
     new_provider_id = None
 
-    if dbmod.is_configured():
-        try:
-            from sqlalchemy import select
+    if not dbmod.is_configured():
+        raise HTTPException(
+            status_code=500,
+            detail="DATABASE_URL is not configured - providers live in DB (managed via /admin).",
+        )
+    try:
+        from sqlalchemy import select
 
-            async with dbmod.session() as sess:
-                # Check unique name
-                existing = (await sess.execute(select(DBProvider).where(DBProvider.name == payload.name))).scalar_one_or_none()
-                if existing:
-                    raise HTTPException(status_code=400, detail=f"Provider with name '{payload.name}' already exists.")
-                
-                p = DBProvider(
-                    name=payload.name,
-                    base_url=payload.base_url.rstrip("/"),
-                    model=payload.model,
-                    priority=payload.priority,
-                    enabled=payload.enabled,
-                    timeout_ms=int(payload.timeout_s * 1000),
-                )
-                if payload.api_key:
-                    p.api_key = payload.api_key
-                sess.add(p)
-                await sess.commit()
-                await sess.refresh(p)
-                new_provider_id = p.id
-            await sync_router_providers(services.router)
-            broadcaster.broadcast("providers_changed", {"action": "create", "id": new_provider_id, "name": payload.name})
-            broadcaster.broadcast("overview_changed", {})
-            return {"ok": True, "id": new_provider_id, "message": "Provider created and router reloaded."}
-        except HTTPException:
-            raise
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"Database error creating provider: {exc}")
-
-    # File-backed persistence (data/providers.json)
-    stored = load_stored_providers()
-    if any(p["name"].lower() == payload.name.lower() for p in stored):
-        raise HTTPException(status_code=400, detail=f"Provider with name '{payload.name}' already exists.")
-
-    next_id = max([p.get("id", 0) for p in stored], default=0) + 1
-    new_entry = {
-        "id": next_id,
-        "name": payload.name,
-        "base_url": payload.base_url.rstrip("/"),
-        "api_key": payload.api_key or "",
-        "model": payload.model,
-        "priority": payload.priority,
-        "enabled": payload.enabled,
-        "timeout_s": payload.timeout_s,
-    }
-    stored.append(new_entry)
-    save_stored_providers(stored)
-    await sync_router_providers(services.router)
-    broadcaster.broadcast("providers_changed", {"action": "create", "id": next_id, "name": payload.name})
-    broadcaster.broadcast("overview_changed", {})
-
-    return {"ok": True, "id": next_id, "message": "Provider created and saved to disk."}
+        async with dbmod.session() as sess:
+            # Check unique name
+            existing = (await sess.execute(select(DBProvider).where(DBProvider.name == payload.name))).scalar_one_or_none()
+            if existing:
+                raise HTTPException(status_code=400, detail=f"Provider with name '{payload.name}' already exists.")
+            
+            p = DBProvider(
+                name=payload.name,
+                base_url=payload.base_url.rstrip("/"),
+                model=payload.model,
+                priority=payload.priority,
+                enabled=payload.enabled,
+                timeout_ms=int(payload.timeout_s * 1000),
+            )
+            if payload.api_key:
+                p.api_key = payload.api_key
+            sess.add(p)
+            await sess.commit()
+            await sess.refresh(p)
+            new_provider_id = p.id
+        await sync_router_providers(services.router)
+        broadcaster.broadcast("providers_changed", {"action": "create", "id": new_provider_id, "name": payload.name})
+        broadcaster.broadcast("overview_changed", {})
+        return {"ok": True, "id": new_provider_id, "message": "Provider created and router reloaded."}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Database error creating provider: {exc}")
 
 
 @router.put("/providers/{provider_id}", dependencies=[Depends(require_admin)])
 async def update_provider(provider_id: str, payload: ProviderPayload, request: Request):
+    """Update a provider. DB-only - Admin Panel is the source of truth."""
     services: Services = request.app.state.services
 
-    if dbmod.is_configured():
-        try:
-            from sqlalchemy import select
-
-            async with dbmod.session() as sess:
-                p = None
-                if provider_id.isdigit():
-                    p = (await sess.execute(select(DBProvider).where(DBProvider.id == int(provider_id)))).scalar_one_or_none()
-                if not p:
-                    p = (await sess.execute(select(DBProvider).where(DBProvider.name == payload.name))).scalar_one_or_none()
-                if not p:
-                    p = (await sess.execute(select(DBProvider).where(DBProvider.name == provider_id))).scalar_one_or_none()
-                
-                if p:
-                    p.name = payload.name
-                    p.base_url = payload.base_url.rstrip("/")
-                    p.model = payload.model
-                    p.priority = payload.priority
-                    p.enabled = payload.enabled
-                    p.timeout_ms = int(payload.timeout_s * 1000)
-                    if payload.api_key:
-                        p.api_key = payload.api_key
-                    await sess.commit()
-                    await sync_router_providers(services.router)
-                    broadcaster.broadcast("providers_changed", {"action": "update", "id": provider_id, "name": payload.name})
-                    broadcaster.broadcast("overview_changed", {})
-                    return {"ok": True, "message": "Provider updated and router reloaded."}
-                raise HTTPException(status_code=404, detail=f"Provider '{provider_id}' not found.")
-        except HTTPException:
-            raise
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"Database error updating provider: {exc}")
-
-    # File-backed persistence
-    stored = load_stored_providers()
-    found = False
-    for p in stored:
-        is_target = (
-            str(p.get("id")) == str(provider_id)
-            or p.get("name") == provider_id
-            or p.get("name") == payload.name
+    if not dbmod.is_configured():
+        raise HTTPException(
+            status_code=500,
+            detail="DATABASE_URL is not configured - providers live in DB (managed via /admin).",
         )
-        if is_target:
-            found = True
-            p["name"] = payload.name
-            p["base_url"] = payload.base_url.rstrip("/")
-            if payload.api_key:
-                p["api_key"] = payload.api_key
-            p["model"] = payload.model
-            p["priority"] = payload.priority
-            p["enabled"] = payload.enabled
-            p["timeout_s"] = payload.timeout_s
-            break
+    try:
+        from sqlalchemy import select
 
-    if not found:
-        raise HTTPException(status_code=404, detail=f"Provider '{provider_id}' not found.")
-
-    save_stored_providers(stored)
-    await sync_router_providers(services.router)
-    broadcaster.broadcast("providers_changed", {"action": "update", "id": provider_id, "name": payload.name})
-    broadcaster.broadcast("overview_changed", {})
-    return {"ok": True, "message": "Provider updated and saved to disk."}
+        async with dbmod.session() as sess:
+            p = None
+            if provider_id.isdigit():
+                p = (await sess.execute(select(DBProvider).where(DBProvider.id == int(provider_id)))).scalar_one_or_none()
+            if not p:
+                p = (await sess.execute(select(DBProvider).where(DBProvider.name == payload.name))).scalar_one_or_none()
+            if not p:
+                p = (await sess.execute(select(DBProvider).where(DBProvider.name == provider_id))).scalar_one_or_none()
+            
+            if p:
+                p.name = payload.name
+                p.base_url = payload.base_url.rstrip("/")
+                p.model = payload.model
+                p.priority = payload.priority
+                p.enabled = payload.enabled
+                p.timeout_ms = int(payload.timeout_s * 1000)
+                if payload.api_key:
+                    p.api_key = payload.api_key
+                await sess.commit()
+                await sync_router_providers(services.router)
+                broadcaster.broadcast("providers_changed", {"action": "update", "id": provider_id, "name": payload.name})
+                broadcaster.broadcast("overview_changed", {})
+                return {"ok": True, "message": "Provider updated and router reloaded."}
+            raise HTTPException(status_code=404, detail=f"Provider '{provider_id}' not found.")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Database error updating provider: {exc}")
 
 
 @router.delete("/providers/{provider_id}", dependencies=[Depends(require_admin)])
 async def delete_provider(provider_id: str, request: Request):
+    """Delete a provider. DB-only - Admin Panel is the source of truth."""
     services: Services = request.app.state.services
 
-    if dbmod.is_configured():
-        try:
-            from sqlalchemy import select
+    if not dbmod.is_configured():
+        raise HTTPException(
+            status_code=500,
+            detail="DATABASE_URL is not configured - providers live in DB (managed via /admin).",
+        )
+    try:
+        from sqlalchemy import select
 
-            async with dbmod.session() as sess:
-                p = None
-                if provider_id.isdigit():
-                    p = (await sess.execute(select(DBProvider).where(DBProvider.id == int(provider_id)))).scalar_one_or_none()
-                if not p:
-                    p = (await sess.execute(select(DBProvider).where(DBProvider.name == provider_id))).scalar_one_or_none()
-                if p:
-                    await sess.delete(p)
-                    await sess.commit()
-                    await sync_router_providers(services.router)
-                    broadcaster.broadcast("providers_changed", {"action": "delete", "id": provider_id})
-                    broadcaster.broadcast("overview_changed", {})
-                    return {"ok": True, "message": "Provider deleted and router reloaded."}
-                raise HTTPException(status_code=404, detail=f"Provider '{provider_id}' not found.")
-        except HTTPException:
-            raise
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=f"Database error deleting provider: {exc}")
-
-    # File-backed persistence
-    stored = load_stored_providers()
-    orig_len = len(stored)
-    stored = [
-        p for p in stored
-        if str(p.get("id")) != str(provider_id) and p.get("name") != provider_id
-    ]
-
-    if len(stored) == orig_len:
-        raise HTTPException(status_code=404, detail=f"Provider '{provider_id}' not found.")
-
-    save_stored_providers(stored)
-    await sync_router_providers(services.router)
-    broadcaster.broadcast("providers_changed", {"action": "delete", "id": provider_id})
-    broadcaster.broadcast("overview_changed", {})
-    return {"ok": True, "message": "Provider deleted and removed from disk."}
+        async with dbmod.session() as sess:
+            p = None
+            if provider_id.isdigit():
+                p = (await sess.execute(select(DBProvider).where(DBProvider.id == int(provider_id)))).scalar_one_or_none()
+            if not p:
+                p = (await sess.execute(select(DBProvider).where(DBProvider.name == provider_id))).scalar_one_or_none()
+            if p:
+                await sess.delete(p)
+                await sess.commit()
+                await sync_router_providers(services.router)
+                broadcaster.broadcast("providers_changed", {"action": "delete", "id": provider_id})
+                broadcaster.broadcast("overview_changed", {})
+                return {"ok": True, "message": "Provider deleted and router reloaded."}
+            raise HTTPException(status_code=404, detail=f"Provider '{provider_id}' not found.")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Database error deleting provider: {exc}")
 
 
 
@@ -580,7 +512,7 @@ async def test_provider(req: TestProviderRequest):
     base = req.base_url.rstrip("/")
     api_key = (req.api_key or "").strip()
 
-    # 1. If key is blank or contains masked bullet characters (•), retrieve real unmasked key
+    # 1. If key is blank or contains masked bullet characters (•), retrieve real unmasked key from DB
     if not api_key or "•" in api_key:
         if dbmod.is_configured():
             try:
@@ -597,16 +529,6 @@ async def test_provider(req: TestProviderRequest):
                         api_key = p.api_key
             except Exception:
                 pass
-        if not api_key or "•" in api_key:
-            stored = load_stored_providers()
-            for p in stored:
-                is_match = (
-                    (req.id is not None and (str(p.get("id")) == str(req.id) or p.get("name") == str(req.id)))
-                    or (p.get("base_url", "").rstrip("/") == base and p.get("model") == req.model)
-                )
-                if is_match and p.get("api_key"):
-                    api_key = p["api_key"]
-                    break
 
     # 2. Check if key is available
     if not api_key:

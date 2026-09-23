@@ -144,17 +144,13 @@ def test_publish_gate_allows_a_clean_case():
     reason="set PYTEST_LIVE_PROVIDER=1 to run the 40 cases through a provider",
 )
 async def test_live_provider_passes_the_set():
-    from app import config
-    from app.services.provider import Provider, ProviderRouter
+    # DB-only: providers come from the providers table (Admin Panel data).
+    from app.services.provider import ProviderRouter
+    from app.store.providers import get_active_service_providers
 
-    router = ProviderRouter(
-        providers=[
-            Provider(
-                name="live", base_url=config.PROVIDER_BASE_URL,
-                api_key=config.PROVIDER_API_KEY, model=config.PROVIDER_MODEL,
-            )
-        ]
-    )
+    active = await get_active_service_providers()
+    assert active, "providers table is empty - add providers via /admin"
+    router = ProviderRouter(providers=active)
     try:
         results = await run_live(compile_policy(1), router)
     finally:

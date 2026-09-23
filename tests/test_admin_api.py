@@ -191,6 +191,9 @@ def test_admin_audit_logs_fallback(client, auth_headers):
 
 
 def test_admin_provider_toggle_and_anthropic_test(client, auth_headers):
+    # Clean up leftover from a previous interrupted run (unique-name guard
+    # returns 400 if the row still exists in the real test DB).
+    client.delete("/api/admin/providers/claude-test-provider", headers=auth_headers)
     # 1. Create a provider with enabled=False (Paused)
     payload = {
         "name": "claude-test-provider",

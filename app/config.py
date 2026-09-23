@@ -1,11 +1,15 @@
 """Central configuration. Everything comes from environment variables.
 
+Provider credentials live ONLY in the database, managed via the
+/admin Providers page (Admin Panel is the single source of truth).
+No PROVIDER_* / PROVIDERS_JSON env vars exist by design.
+
 Required for a live run:
-    BOT_TOKEN, PROVIDER_BASE_URL, PROVIDER_API_KEY, PROVIDER_MODEL
+    BOT_TOKEN, DATABASE_URL (providers come from DB)
 
 Optional:
     ALERT_BOT_TOKEN, ADMIN_CHAT_ID, WEBHOOK_SECRET, WEBHOOK_PATH_SECRET,
-    DATABASE_URL (Neon pooled connection string), REDIS_URL,
+    REDIS_URL,
     ALLOWED_USER_IDS (comma-separated, seeded as staff),
     ADMIN_USER_IDS (comma-separated, seeded as admin),
     TEST_ALLOW_ALL (default false - bypasses the allowlist gate),
@@ -78,40 +82,14 @@ ADMIN_CHAT_ID = get("ADMIN_CHAT_ID")
 WEBHOOK_SECRET = get("WEBHOOK_SECRET")            # X-Telegram-Bot-Api-Secret-Token header
 WEBHOOK_PATH_SECRET = get("WEBHOOK_PATH_SECRET")  # path segment of the webhook URL
 
-# --- AI provider (OpenAI-compatible chat completions) ------------------------
-PROVIDER_BASE_URL = get("PROVIDER_BASE_URL").rstrip("/")
-PROVIDER_API_KEY = get("PROVIDER_API_KEY")
-PROVIDER_MODEL = get("PROVIDER_MODEL")
+# --- AI provider tuning (OpenAI-compatible chat completions) -----------------
+# NOTE: provider credentials (base_url / api_key / model / priority) live
+# ONLY in the database, managed via /admin Providers. No PROVIDER_* or
+# PROVIDERS_JSON env vars - Admin Panel is the single source of truth.
 PROVIDER_TIMEOUT_S = _get_float("PROVIDER_TIMEOUT_S", 8.0)
 PROVIDER_MAX_CONCURRENCY = _get_int("PROVIDER_MAX_CONCURRENCY", 8)
 # Keep enough output budget for a full translation of the 500-character input cap.
 PROVIDER_MAX_OUTPUT_TOKENS = _get_int("PROVIDER_MAX_OUTPUT_TOKENS", 1024)
-# Optional JSON list of backup providers, e.g.
-# PROVIDERS_JSON='[{"name":"backup","base_url":"https://...","api_key":"...","model":"...","priority":2}]'
-# When set, it replaces the single PROVIDER_* vars (which remain the default).
-PROVIDERS_JSON = get("PROVIDER_JSON") or get("PROVIDERS_JSON")
-
-
-def provider_defs() -> list[dict]:
-    """Provider configs: optional PROVIDERS_JSON, else the single PROVIDER_* set."""
-    import json
-
-    if PROVIDERS_JSON:
-        try:
-            defs = json.loads(PROVIDERS_JSON)
-            if isinstance(defs, list) and defs:
-                return defs
-        except (ValueError, TypeError):
-            pass
-    return [
-        {
-            "name": "primary",
-            "base_url": PROVIDER_BASE_URL,
-            "api_key": PROVIDER_API_KEY,
-            "model": PROVIDER_MODEL,
-            "priority": 1,
-        }
-    ]
 
 # --- Storage ----------------------------------------------------------------
 DATABASE_URL = get("DATABASE_URL")  # Neon pooled connection string
@@ -150,16 +128,17 @@ ADMIN_USER_IDS = _get_id_list("ADMIN_USER_IDS")
 
 
 def validate_live() -> list[str]:
-    """Return a list of missing required settings for a live run."""
+    """Return a list of missing required settings for a live run.
+
+    Provider credentials are NOT env vars - they live in the DB and are
+    managed via /admin Providers. Only the bot token (+ DATABASE_URL, which
+    is how providers are reached) is required here.
+    """
     missing = []
     if not BOT_TOKEN:
         missing.append("BOT_TOKEN")
-    if not PROVIDER_BASE_URL:
-        missing.append("PROVIDER_BASE_URL")
-    if not PROVIDER_API_KEY:
-        missing.append("PROVIDER_API_KEY")
-    if not PROVIDER_MODEL:
-        missing.append("PROVIDER_MODEL")
+    if not DATABASE_URL:
+        missing.append("DATABASE_URL (providers live in DB - managed via /admin)")
     if MODE == "webhook" and not WEBHOOK_PATH_SECRET:
         missing.append("WEBHOOK_PATH_SECRET (required in webhook mode)")
     return missing

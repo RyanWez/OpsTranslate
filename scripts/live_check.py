@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import sys
 import time
 
@@ -54,26 +53,11 @@ def check_config() -> bool:
            config.MODE)
     report(bool(config.BOT_TOKEN), "BOT_TOKEN set", mask(config.BOT_TOKEN))
 
-    if config.PROVIDERS_JSON:
-        try:
-            json.loads(config.PROVIDERS_JSON)
-            report(True, "PROVIDERS_JSON parses")
-        except (ValueError, TypeError) as exc:
-            # provider_defs() swallows this and silently falls back to the
-            # single PROVIDER_* set - which is never what the operator meant.
-            report(False, "PROVIDERS_JSON parses",
-                   f"{type(exc).__name__}: the single PROVIDER_* set would be "
-                   "used instead, silently")
-
-    defs = config.provider_defs()
-    names = [d.get("name") for d in defs]
-    report(len(defs) >= 1, "at least one provider configured", ", ".join(names))
-    for d in defs:
-        base = (d.get("base_url") or "").rstrip("/")
-        report(base.startswith("http"), f"provider {d.get('name')} base_url",
-               f"{base}/chat/completions")
-        report(bool(d.get("api_key")), f"provider {d.get('name')} api_key",
-               mask(d.get("api_key") or ""))
+    # Providers are DB-only (Admin Panel is the source of truth) - no
+    # PROVIDERS_JSON / PROVIDER_* env vars exist by design.
+    report(not hasattr(config, "PROVIDERS_JSON") and not getattr(config, "PROVIDER_BASE_URL", ""),
+           "no legacy provider env vars (DB-only mode)",
+           "PROVIDERS_JSON/PROVIDER_* must not exist")
 
     print(f"      group gate      : GROUP_CHAT_ID={config.GROUP_CHAT_ID or '(disabled)'}"
           f" TEST_ALLOW_ALL={config.TEST_ALLOW_ALL}")
@@ -135,22 +119,19 @@ async def check_translate() -> None:
     from app.policy.policy import compile_policy, mask, normalise, protect_entities
     from app.services.alerts import AlertManager
     from app.services.pipeline import resolve_toggle_dst, translate_policied
-    from app.services.provider import Provider, ProviderRouter
+    from app.services.provider import ProviderRouter
+    from app.store.providers import get_active_service_providers
 
     print("\n== 4. probe translations (real provider) ==")
     policy = compile_policy(config.POLICY_VERSION)
+    # DB-only: providers come from the providers table (Admin Panel data).
+    active = await get_active_service_providers()
+    report(len(active) >= 1, "at least one provider in DB (add via /admin)",
+           ", ".join(p.name for p in active) or "providers table is empty")
+    if not active:
+        return
     router = ProviderRouter(
-        providers=[
-            Provider(
-                name=d.get("name", "primary"),
-                base_url=(d.get("base_url") or "").rstrip("/"),
-                api_key=d.get("api_key") or "",
-                model=d.get("model") or "",
-                priority=int(d.get("priority", 1)),
-                timeout_s=float(d.get("timeout_s", config.PROVIDER_TIMEOUT_S)),
-            )
-            for d in config.provider_defs()
-        ],
+        providers=active,
         max_concurrency=config.PROVIDER_MAX_CONCURRENCY,
     )
     alerts = AlertManager(config.ALERT_BOT_TOKEN, config.ADMIN_CHAT_ID)
@@ -197,20 +178,18 @@ def mask_text(text: str) -> str:
 async def check_regression() -> None:
     from app.policy.policy import compile_policy
     from app.policy.regression_set import run_live
-    from app.services.provider import Provider, ProviderRouter
+    from app.services.provider import ProviderRouter
+    from app.store.providers import get_active_service_providers
 
     print("\n== 5. 40-case regression set (live provider) ==")
+    # DB-only: providers come from the providers table (Admin Panel data).
+    active = await get_active_service_providers()
+    if not active:
+        report(False, "at least one provider in DB (add via /admin)",
+               "providers table is empty")
+        return
     router = ProviderRouter(
-        providers=[
-            Provider(
-                name=d.get("name", "primary"),
-                base_url=(d.get("base_url") or "").rstrip("/"),
-                api_key=d.get("api_key") or "",
-                model=d.get("model") or "",
-                timeout_s=float(d.get("timeout_s", config.PROVIDER_TIMEOUT_S)),
-            )
-            for d in config.provider_defs()
-        ],
+        providers=active,
         max_concurrency=config.PROVIDER_MAX_CONCURRENCY,
     )
     try:

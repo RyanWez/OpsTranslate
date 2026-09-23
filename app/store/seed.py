@@ -5,8 +5,11 @@ Creates tables (if missing) and seeds:
   - settings: max_input_chars = config.MAX_INPUT_CHARS
   - policy_versions v1 (published) with the section 4.2 mapping,
     per-language deny lists, and a starter regression set
-  - providers: the primary provider from env
   - prompts: the default system-prompt reference row
+
+NOTE: providers are NOT seeded from env - they live ONLY in the DB and are
+managed via the /admin Providers page (Admin Panel is the source of truth).
+An empty providers table after deploy means the admin has added none yet.
 
 Run:  python -m app.store.seed   (requires DATABASE_URL)
 Safe to re-run: existing rows are left untouched.
@@ -27,7 +30,6 @@ from .models import (
     PolicyTest,
     PolicyVersion,
     Prompt,
-    Provider,
     Setting,
     TermConcept,
     TermOutput,
@@ -125,19 +127,8 @@ async def seed() -> None:
                 )
             log.info("seeded policy v%d", version)
 
-        # --- providers -----------------------------------------------------
-        existing = (
-            await sess.execute(select(Provider).where(Provider.name == "primary"))
-        ).scalar_one_or_none()
-        if existing is None and config.PROVIDER_BASE_URL:
-            sess.add(
-                Provider(
-                    name="primary", kind="openai_compatible",
-                    base_url=config.PROVIDER_BASE_URL, model=config.PROVIDER_MODEL,
-                    priority=1, enabled=True,
-                    timeout_ms=int(config.PROVIDER_TIMEOUT_S * 1000),
-                )
-            )
+        # NOTE: no provider seeding - providers live ONLY in the DB, managed
+        # via /admin Providers. An empty table = admin hasn't added any yet.
 
         # --- prompts -------------------------------------------------------
         has_prompt = (
