@@ -10,9 +10,11 @@ match, otherwise 403 and the update is dropped silently.
 Gate 2 (idempotency) runs as an update outer-middleware in both modes:
 update_id not seen in the last 5 minutes (Redis SET NX EX 300).
 
-/healthz is a real check (db, cache, policy loaded, any provider circuit
-closed, recent successful traffic OR outside working hours) and returns
-503 when degraded.
+/livez is the Fly liveness probe (always 200 when the process serves HTTP).
+/healthz is a deep check (db, cache, policy loaded, any provider circuit
+closed) plus an informational "traffic" flag (recent success within 10 min
+or outside working hours); "traffic": false no longer returns 503 so an
+idle bot during working hours still routes admin traffic.
 """
 from __future__ import annotations
 
@@ -303,6 +305,17 @@ async def webhook(
     return {"ok": True}
 
 
+@app.get("/livez")
+async def livez():
+    """Liveness probe for Fly: process is up and serving HTTP.
+
+    Unlike /healthz (which reports deep dependency + traffic state and
+    may return 503 during idle working hours), this always returns 200
+    so Fly's proxy keeps routing inbound admin traffic.
+    """
+    return {"status": "ok"}
+
+
 @app.get("/healthz")
 async def healthz():
     from .store import db as dbmod
@@ -324,6 +337,11 @@ async def healthz():
         "cache": await services.cache.ping(),
         "policy": services.policy.loaded,
         "provider": services.router.any_closed(),
+        # NOTE: "traffic" (recent successful translation within 10 min) is
+        # informational only. It must NOT flip the HTTP status: an idle bot
+        # during working hours is healthy - Fly routes /admin traffic away
+        # when this returns 503, which kills the admin login page even
+        # though the bot (outbound polling) keeps working.
         "traffic": traffic_ok,
     }
     # P1.3: healthz is the observer for DB/cache - raise/resolve alerts here
@@ -359,5 +377,5 @@ async def healthz():
     except Exception:  # noqa: BLE001
         log.warning("healthz_alert_failed", exc_info=True)
 
-    ok = all(checks.values())
+    ok = all(v for k, v in checks.items() if k != "traffic")
     return JSONResponse(checks, status_code=200 if ok else 503)
