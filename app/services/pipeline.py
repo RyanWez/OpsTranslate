@@ -37,6 +37,7 @@ from aiogram.utils.chat_action import ChatActionSender
 
 from .. import config
 from ..bot import strings
+from ..bot.emojis import get_custom_emoji_id
 from .cache import Cache, cache_key, duplicate_key
 from ..policy.langdetect import detect
 from . import ratelimit
@@ -93,16 +94,19 @@ def copy_keyboard(result_text: str) -> InlineKeyboardMarkup | None:
     # Telegram Bot API limit for CopyTextButton: 1-256 characters.
     if not result_text or len(result_text) > 256:
         return None
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text=strings.COPY_BUTTON,
-                    copy_text=CopyTextButton(text=result_text),
-                )
-            ]
-        ]
-    )
+    custom_icon_id = get_custom_emoji_id("copy_button")
+    if custom_icon_id:
+        button = InlineKeyboardButton(
+            text="Copy",
+            copy_text=CopyTextButton(text=result_text),
+            icon_custom_emoji_id=custom_icon_id,
+        )
+    else:
+        button = InlineKeyboardButton(
+            text=strings.copy_button_text(),
+            copy_text=CopyTextButton(text=result_text),
+        )
+    return InlineKeyboardMarkup(inline_keyboard=[[button]])
 
 
 def lang_buttons() -> InlineKeyboardMarkup:
@@ -317,20 +321,41 @@ async def _edit_text(
                 return
             except Exception:
                 pass
-        if "button_copy_text_invalid" in err and reply_markup is not None:
-            log.warning("Telegram rejected copy button (%s); retrying without markup", exc)
+        if reply_markup is not None and any(k in err for k in ("button", "custom_emoji", "icon")):
+            log.warning("Telegram rejected button markup (%s); retrying with fallback plain button", exc)
+            fallback_kb = InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [
+                        InlineKeyboardButton(
+                            text=strings.copy_button_text(),
+                            copy_text=CopyTextButton(text=text.split("\n", 1)[-1] if "\n" in text else text),
+                        )
+                    ]
+                ]
+            )
             try:
                 await services.bot.edit_message_text(
                     chat_id=chat_id,
                     message_id=placeholder_id,
                     text=text,
-                    reply_markup=None,
+                    reply_markup=fallback_kb,
                     parse_mode=parse_mode,
                     disable_web_page_preview=True,
                 )
                 return
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception:
+                try:
+                    await services.bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=placeholder_id,
+                        text=text,
+                        reply_markup=None,
+                        parse_mode=parse_mode,
+                        disable_web_page_preview=True,
+                    )
+                    return
+                except Exception:
+                    pass
         raise
 
 

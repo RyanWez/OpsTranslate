@@ -115,7 +115,8 @@ async def _gate_access(
         log.info("access_denied user=%s reason=%s", message.from_user.id, reason)
         if reason == "suspended":
             try:
-                await message.answer("⚠️ Your account access has been suspended by an administrator.")
+                warn = strings.get_emoji("warning")
+                await message.answer(f"{warn} Your account access has been suspended by an administrator.", parse_mode="HTML")
             except Exception:
                 pass
         return False

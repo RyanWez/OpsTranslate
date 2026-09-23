@@ -50,7 +50,7 @@ DEFAULT_SLOTS: dict[str, EmojiSlot] = {
         label="Copy Button Icon",
         category="Pipeline",
         fallback="📋",
-        description="Icon displayed on the 1-click Copy button (Unicode Emoji only, e.g. 📋)",
+        description="Icon displayed on the 1-click Copy button (Telegram Custom Emoji ID or Unicode)",
     ),
 
     # Bot Commands
@@ -264,7 +264,11 @@ def get_all_slots() -> list[dict[str, Any]]:
     res = []
     for slot in _slots_cache.values():
         if slot.key == "copy_button":
-            preview = f"{slot.fallback} Copy"
+            cid = (slot.custom_emoji_id or "").strip()
+            if cid and cid.isdigit():
+                preview = f"[Icon: {cid}] Copy"
+            else:
+                preview = f"{slot.fallback} Copy"
         else:
             preview = get_emoji(slot.key)
         res.append({

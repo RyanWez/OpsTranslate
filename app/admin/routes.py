@@ -1320,7 +1320,9 @@ async def test_bot_emojis_endpoint(request: Request):
     )
 
     try:
-        sent = await bot.send_message(chat_id=admin_chat_id, text=text, parse_mode="HTML")
+        from ..services.pipeline import copy_keyboard
+        kb = copy_keyboard("Sample translation text preview")
+        sent = await bot.send_message(chat_id=admin_chat_id, text=text, parse_mode="HTML", reply_markup=kb)
         return {"ok": True, "message_id": sent.message_id}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Telegram API test send failed: {exc}")
