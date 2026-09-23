@@ -81,4 +81,9 @@ export const api = {
   }) => apiClient.get<TranslationHistoryResponse>('/history', { params }),
   getHistoryDetail: (id: number) => apiClient.get<TranslationHistoryItem>(`/history/${id}`),
   pruneHistory: (days = 30) => apiClient.delete<{ ok: boolean; deleted_count: number }>('/history/prune', { params: { days } }),
+
+  // Telegram Bot Commands
+  getBotCommands: () => apiClient.get<{ commands: { command: string; description: string }[] }>('/bot-commands'),
+  updateBotCommands: (commands: { command: string; description: string }[]) =>
+    apiClient.put<{ ok: boolean; commands: { command: string; description: string }[] }>('/bot-commands', { commands }),
 }

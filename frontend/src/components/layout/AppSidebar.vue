@@ -10,6 +10,7 @@ import {
   ChatboxEllipsesOutline,
   DocumentTextOutline,
   ShieldCheckmarkOutline,
+  TerminalOutline,
 } from '@vicons/ionicons5'
 
 const route = useRoute()
@@ -51,6 +52,11 @@ const menuOptions = [
     label: 'Translation History',
     key: 'history',
     icon: renderIcon(ChatboxEllipsesOutline),
+  },
+  {
+    label: 'Bot Commands',
+    key: 'commands',
+    icon: renderIcon(TerminalOutline),
   },
   {
     label: 'Audit Logs',

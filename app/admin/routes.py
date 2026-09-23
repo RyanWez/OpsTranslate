@@ -1213,4 +1213,36 @@ async def prune_translation_history(days: int = Query(default=30, ge=1)):
         raise HTTPException(status_code=500, detail=f"Prune failed: {exc}")
 
 
+class CommandItem(BaseModel):
+    command: str
+    description: str
+
+
+class UpdateCommandsRequest(BaseModel):
+    commands: list[CommandItem]
+
+
+@router.get("/bot-commands", dependencies=[Depends(require_admin)])
+async def get_bot_commands_endpoint():
+    """Retrieve active Telegram bot menu commands."""
+    from ..bot.commands import load_bot_commands
+
+    cmds = await load_bot_commands()
+    return {"commands": [{"command": c.command, "description": c.description} for c in cmds]}
+
+
+@router.put("/bot-commands", dependencies=[Depends(require_admin)])
+async def update_bot_commands_endpoint(req: UpdateCommandsRequest, request: Request):
+    """Save custom Telegram bot commands and immediately sync with Telegram API."""
+    from ..bot.commands import save_bot_commands
+
+    bot = getattr(request.app.state, "bot", None)
+    cmds = await save_bot_commands([c.model_dump() for c in req.commands], bot=bot)
+    return {
+        "ok": True,
+        "commands": [{"command": c.command, "description": c.description} for c in cmds],
+    }
+
+
+
 

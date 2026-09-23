@@ -54,6 +54,11 @@ const routes: RouteRecordRaw[] = [
         component: HistoryView,
       },
       {
+        path: 'commands',
+        name: 'commands',
+        component: () => import('../views/BotCommandsView.vue'),
+      },
+      {
         path: 'logs',
         name: 'logs',
         component: LogsView,
