@@ -136,6 +136,13 @@ async def lifespan(app: FastAPI):
     except Exception:
         log.warning("initial_bot_commands_registration_failed", exc_info=True)
 
+    # Load animated emoji configuration from DB
+    try:
+        from .bot.emojis import load_emoji_config
+        await load_emoji_config()
+    except Exception:
+        log.warning("initial_emoji_config_load_failed", exc_info=True)
+
     polling_task = None
     shutdown_event = asyncio.Event()
     if config.MODE == "polling":

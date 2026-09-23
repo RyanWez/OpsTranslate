@@ -1244,5 +1244,88 @@ async def update_bot_commands_endpoint(req: UpdateCommandsRequest, request: Requ
     }
 
 
+class EmojiSlotUpdate(BaseModel):
+    key: str
+    custom_emoji_id: str = ""
+    fallback: str = ""
+
+
+class UpdateEmojisRequest(BaseModel):
+    slots: list[EmojiSlotUpdate]
+
+
+@router.get("/bot-emojis", dependencies=[Depends(require_admin)])
+async def get_bot_emojis_endpoint():
+    """Retrieve all animated emoji slot configurations."""
+    from ..bot.emojis import get_all_slots, load_emoji_config
+
+    await load_emoji_config()
+    return {"slots": get_all_slots()}
+
+
+@router.put("/bot-emojis", dependencies=[Depends(require_admin)])
+async def update_bot_emojis_endpoint(req: UpdateEmojisRequest):
+    """Update custom emoji IDs and fallbacks."""
+    from ..bot.emojis import get_all_slots, save_emoji_config
+
+    slots_dict = {
+        item.key: {
+            "custom_emoji_id": item.custom_emoji_id.strip(),
+            "fallback": item.fallback.strip(),
+        }
+        for item in req.slots
+    }
+    await save_emoji_config(slots_dict)
+    return {"ok": True, "slots": get_all_slots()}
+
+
+@router.post("/bot-emojis/test", dependencies=[Depends(require_admin)])
+async def test_bot_emojis_endpoint(request: Request):
+    """Send a live preview of configured animated emojis to the admin Telegram chat."""
+    from ..bot.emojis import get_emoji
+
+    bot = getattr(request.app.state, "bot", None)
+    admin_chat_id = config.ADMIN_CHAT_ID
+    if not admin_chat_id and getattr(config, "ADMIN_USER_IDS", None):
+        admin_chat_id = config.ADMIN_USER_IDS[0]
+    if not admin_chat_id and getattr(config, "ALLOWED_USER_IDS", None):
+        admin_chat_id = config.ALLOWED_USER_IDS[0]
+    if not admin_chat_id and getattr(config, "GROUP_CHAT_ID", None):
+        admin_chat_id = config.GROUP_CHAT_ID
+
+    if not bot or not admin_chat_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Bot instance or ADMIN_CHAT_ID is not configured. Please set ADMIN_CHAT_ID or ADMIN_USER_IDS in .env.",
+        )
+
+    text = (
+        f"<b>Telegram Animated Emoji Set Preview</b>\n\n"
+        f"<b>1. Translation Pipeline:</b>\n"
+        f"• Loading: {get_emoji('loading')} Translating…\n"
+        f"• Header: {get_emoji('header_globe')} MY {get_emoji('arrow')} EN\n"
+        f"• Button: {get_emoji('copy_button')} Copy\n\n"
+        f"<b>2. Commands:</b>\n"
+        f"• /start Wave: {get_emoji('start_welcome')}\n"
+        f"• Auto Mode: {get_emoji('auto_mode')}\n"
+        f"• /help Book: {get_emoji('help_book')}\n"
+        f"• /help Shield: {get_emoji('help_privacy')}\n"
+        f"• /status Chart: {get_emoji('status_chart')}\n"
+        f"• /report Check: {get_emoji('report_success')}\n"
+        f"• /whoami Badge: {get_emoji('whoami_badge')}\n\n"
+        f"<b>3. Alerts & Warnings:</b>\n"
+        f"• Warning: {get_emoji('warning')}\n"
+        f"• Rate Limit: {get_emoji('rate_limit')}\n"
+        f"• Unauthorized: {get_emoji('unauthorized')}"
+    )
+
+    try:
+        sent = await bot.send_message(chat_id=admin_chat_id, text=text, parse_mode="HTML")
+        return {"ok": True, "message_id": sent.message_id}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Telegram API test send failed: {exc}")
+
+
+
 
 

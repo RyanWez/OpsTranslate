@@ -266,7 +266,8 @@ async def _send_placeholder(services: Services, chat_id: int, anchor_id: int) ->
         try:
             msg = await services.bot.send_message(
                 chat_id,
-                strings.TRANSLATING,
+                strings.translating_text(),
+                parse_mode="HTML",
                 reply_parameters=ReplyParameters(
                     message_id=anchor_id, allow_sending_without_reply=True
                 ),
@@ -285,6 +286,7 @@ async def _edit_text(
     placeholder_id: int,
     text: str,
     reply_markup=None,
+    parse_mode: str | None = "HTML",
 ) -> None:
     """Best-effort message edit: a FAILED_PRECONDITION (message not modified)
     is normal when two frames render identically - swallow it, let real
@@ -295,12 +297,26 @@ async def _edit_text(
             message_id=placeholder_id,
             text=text,
             reply_markup=reply_markup,
+            parse_mode=parse_mode,
             disable_web_page_preview=True,
         )
     except Exception as exc:  # noqa: BLE001
         err = str(exc).lower()
         if "message is not modified" in err:
             return
+        if "can't parse entities" in err and parse_mode is not None:
+            try:
+                await services.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=placeholder_id,
+                    text=text,
+                    reply_markup=reply_markup,
+                    parse_mode=None,
+                    disable_web_page_preview=True,
+                )
+                return
+            except Exception:
+                pass
         if "button_copy_text_invalid" in err and reply_markup is not None:
             log.warning("Telegram rejected copy button (%s); retrying without markup", exc)
             try:
@@ -309,6 +325,7 @@ async def _edit_text(
                     message_id=placeholder_id,
                     text=text,
                     reply_markup=None,
+                    parse_mode=parse_mode,
                     disable_web_page_preview=True,
                 )
                 return
@@ -327,9 +344,9 @@ async def animate_working(
     provider works, so the message feels alive during the 4-11s wait.
     ~1 edit per 1.2s: far under Telegram's ~30 edits/min/chat limit."""
     frames = [
-        "\u23f3 Translating.",
-        "\u23f3 Translating..",
-        "\u23f3 Translating...",
+        strings.translating_text("."),
+        strings.translating_text(".."),
+        strings.translating_text("..."),
     ]
     i = 0
     try:
@@ -367,13 +384,16 @@ async def _edit_result(
     (:func:`animate_working`) keeps the message alive while the provider
     works; this function then replaces it with the final answer in one edit.
     """
-    header = strings.TRANSLATION_HEADER.format(SRC=src.upper(), DST=dst.upper())
+    import html
+    header = strings.translation_header(src.upper(), dst.upper())
+    escaped_result = html.escape(result)
     await _edit_text(
         services,
         chat_id,
         placeholder_id,
-        f"{header}\n{result}",
+        f"{header}\n{escaped_result}",
         reply_markup=copy_keyboard(result),
+        parse_mode="HTML",
     )
 
 

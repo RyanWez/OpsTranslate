@@ -211,8 +211,10 @@ class FakeMessage:
         self.text = text
         self.caption = caption
         self.chat = SimpleNamespace(type=chat_type, id=chat_id)
-        self.from_user = SimpleNamespace(id=from_id)
+        self.from_user = SimpleNamespace(id=from_id, username=None, full_name=None, first_name=None)
         self.reply_to_message = reply_to
+        self.entities = None
+        self.caption_entities = None
         self.answers: list[str] = []
         self.replies: list[str] = []
 

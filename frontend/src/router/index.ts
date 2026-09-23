@@ -54,6 +54,11 @@ const routes: RouteRecordRaw[] = [
         component: HistoryView,
       },
       {
+        path: 'emojis',
+        name: 'emojis',
+        component: () => import('../views/AnimatedEmojisView.vue'),
+      },
+      {
         path: 'commands',
         name: 'commands',
         component: () => import('../views/BotCommandsView.vue'),

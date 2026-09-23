@@ -86,4 +86,10 @@ export const api = {
   getBotCommands: () => apiClient.get<{ commands: { command: string; description: string }[] }>('/bot-commands'),
   updateBotCommands: (commands: { command: string; description: string }[]) =>
     apiClient.put<{ ok: boolean; commands: { command: string; description: string }[] }>('/bot-commands', { commands }),
+
+  // Telegram Animated Emoji Set
+  getBotEmojis: () => apiClient.get<{ slots: any[] }>('/bot-emojis'),
+  updateBotEmojis: (slots: { key: string; custom_emoji_id: string; fallback: string }[]) =>
+    apiClient.put<{ ok: boolean; slots: any[] }>('/bot-emojis', { slots }),
+  testBotEmojis: () => apiClient.post<{ ok: boolean; message_id?: number }>('/bot-emojis/test'),
 }

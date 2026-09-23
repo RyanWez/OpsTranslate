@@ -181,7 +181,7 @@ async def test_whoami_reports_the_callers_own_id():
     msg = FakeMessage(message_id=43, text="/whoami", from_id=987654)
 
     await handlers.cmd_whoami(msg, services)
-    assert msg.answers == ["Your Telegram user ID: 987654"]
+    assert "Your Telegram user ID:" in msg.answers[0] and "987654" in msg.answers[0]
 
 
 async def test_whoami_works_for_non_members_and_only_in_private(monkeypatch):
@@ -193,7 +193,7 @@ async def test_whoami_works_for_non_members_and_only_in_private(monkeypatch):
 
     msg = FakeMessage(message_id=44, text="/whoami", from_id=555)
     await handlers.cmd_whoami(msg, services)
-    assert msg.answers == ["Your Telegram user ID: 555"]
+    assert "Your Telegram user ID:" in msg.answers[0] and "555" in msg.answers[0]
 
     group_msg = FakeMessage(message_id=45, text="/whoami", chat_type="supergroup",
                             chat_id=-100123456, from_id=555)
@@ -218,7 +218,7 @@ async def test_status_is_admin_only(monkeypatch):
     await handlers.cmd_status(msg2, admin)
     assert len(msg2.answers) == 1
     body = msg2.answers[0]
-    assert body.startswith("Status")
+    assert "Status" in body
     assert "Policy: v1" in body
     assert "Providers:" in body and "- none" in body
 

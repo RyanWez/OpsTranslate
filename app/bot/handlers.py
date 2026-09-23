@@ -45,6 +45,32 @@ router = Router()
 
 _bot_id_cache: dict[int, int] = {}
 
+import re
+
+_WORD_CHAR_RE = re.compile(
+    r"[a-zA-Z0-9\u1000-\u109F\uAA60-\uAA7F\uA9E0-\uA9FE\u4E00-\u9FFF\u3040-\u30FF\u0400-\u04FF\u0E00-\u0E7F]"
+)
+
+
+def _is_text_message_for_translation(text: str, custom_entities: list) -> bool:
+    """Returns True if the message contains actual words/sentences to translate.
+    Returns False if the message is purely custom emojis, standard emojis, or symbols.
+    """
+    if not text.strip():
+        return False
+    if custom_entities:
+        text_utf16 = text.encode("utf-16-le")
+        mask = [False] * (len(text_utf16) // 2)
+        for e in custom_entities:
+            for idx in range(e.offset, min(e.offset + e.length, len(mask))):
+                mask[idx] = True
+        remaining_utf16 = b"".join(
+            text_utf16[i * 2 : (i + 1) * 2] for i in range(len(mask)) if not mask[i]
+        )
+        remaining_text = remaining_utf16.decode("utf-16-le", errors="ignore").strip()
+        return bool(_WORD_CHAR_RE.search(remaining_text))
+    return bool(_WORD_CHAR_RE.search(text))
+
 
 async def _bot_id(bot: Bot) -> int:
     """Resolve once per bot instance (one getMe call per process lifetime)."""
@@ -99,8 +125,8 @@ async def _gate_access(
                 asyncio.create_task(
                     services.user_store.sync_user_profile(
                         message.from_user.id,
-                        full_name=message.from_user.full_name,
-                        username=message.from_user.username,
+                        full_name=getattr(message.from_user, "full_name", None),
+                        username=getattr(message.from_user, "username", None),
                         auto_allow=True,
                     )
                 )
@@ -131,14 +157,19 @@ async def cmd_start(message: Message, services: Services) -> None:
         asyncio.create_task(register_bot_commands(services.bot))
     except Exception:
         pass
-    await message.answer(strings.welcome_text())
+    name = (
+        getattr(message.from_user, "first_name", None)
+        or getattr(message.from_user, "full_name", None)
+    ) if message.from_user else None
+    username = getattr(message.from_user, "username", None) if message.from_user else None
+    await message.answer(strings.welcome_text(name=name, username=username), parse_mode="HTML")
 
 
 @router.message(Command("help"))
 async def cmd_help(message: Message, services: Services) -> None:
     if not await _gate_access(services, message):
         return
-    await message.answer(strings.help_text())
+    await message.answer(strings.help_text(), parse_mode="HTML")
 
 
 @router.message(Command("whoami"))
@@ -149,7 +180,8 @@ async def cmd_whoami(message: Message, services: Services) -> None:
     # so group chats stay quiet.
     if not _is_private(message):
         return
-    await message.answer(f"Your Telegram user ID: {message.from_user.id}")
+    badge = strings.get_emoji("whoami_badge")
+    await message.answer(f"{badge} Your Telegram user ID: <code>{message.from_user.id}</code>", parse_mode="HTML")
     # P3: a /whoami from a non-member is the onboarding signal. Alert so
     # staff notice without polling the logs, but never include message text.
     try:
@@ -157,12 +189,12 @@ async def cmd_whoami(message: Message, services: Services) -> None:
             services.bot, services.cache, message.from_user.id,
             user_store=services.user_store,
         )
-        if message.from_user:
+        if message.from_user and hasattr(services.user_store, "sync_user_profile"):
             asyncio.create_task(
                 services.user_store.sync_user_profile(
                     message.from_user.id,
-                    full_name=message.from_user.full_name,
-                    username=message.from_user.username,
+                    full_name=getattr(message.from_user, "full_name", None),
+                    username=getattr(message.from_user, "username", None),
                     auto_allow=allowed,
                 )
             )
@@ -193,14 +225,19 @@ async def cmd_status(message: Message, services: Services) -> None:
     states = services.router.states()
     prov_lines = "\n".join(f"- {name}: {state}" for name, state in states.items()) or "- none"
     stats = services.stats
+    chart = strings.get_emoji("status_chart")
+    shield = strings.get_emoji("help_privacy")
+    ok_icon = strings.get_emoji("status_ok")
+    fail_icon = strings.get_emoji("status_fail")
     await message.answer(
-        "Status\n"
-        f"Policy: v{services.policy.version}\n"
+        f"{chart} <b>Status</b>\n"
+        f"{shield} Policy: v{services.policy.version}\n"
         f"Providers:\n{prov_lines}\n"
-        f"Today: {stats.translations_ok} ok / {stats.translations_failed} failed\n"
+        f"Today: {ok_icon} {stats.translations_ok} ok / {fail_icon} {stats.translations_failed} failed\n"
         f"Cache hit rate: {stats.cache_hit_rate:.1%}\n"
         f"p95 latency: {stats.p95_latency():.2f}s\n"
-        f"Policy leaks (withheld): {stats.policy_leaks}"
+        f"Policy leaks (withheld): {stats.policy_leaks}",
+        parse_mode="HTML",
     )
 
 
@@ -220,6 +257,7 @@ async def cmd_report(message: Message, services: Services) -> None:
 
     # Privacy by construction: never send raw message text in alerts.
     ref_id = reply.message_id if reply else message.message_id
+    check = strings.get_emoji("report_success")
     try:
         await services.alerts.send(
             "P3",
@@ -228,10 +266,10 @@ async def cmd_report(message: Message, services: Services) -> None:
             f"Staff translation report: user={message.from_user.id} ref_msg={ref_id} note={note[:200]}",
             "Review translation quality and policy dictionary if terminology leaked.",
         )
-        await message.reply("Feedback received. Thank you for reporting to the ops team.")
+        await message.reply(f"{check} Feedback received. Thank you for reporting to the ops team.", parse_mode="HTML")
     except Exception:
         log.warning("translation_report_failed", exc_info=True)
-        await message.reply("Feedback recorded.")
+        await message.reply(f"{check} Feedback recorded.", parse_mode="HTML")
 
 
 @router.message(Command("tr"))
@@ -257,13 +295,37 @@ async def cmd_tr(message: Message, services: Services, bot: Bot) -> None:
             raw_text=rtext,
             anchor_message_id=replied.message_id,
             dst=dst,
-            username=message.from_user.username,
-            display_name=message.from_user.full_name,
+            username=getattr(message.from_user, "username", None) if message.from_user else None,
+            display_name=getattr(message.from_user, "full_name", None) if message.from_user else None,
         )
         return
 
     if rest:
         # /tr <text>: translate the text after the command.
+        entities = message.entities or message.caption_entities or []
+        custom_entities = [
+            e for e in entities
+            if getattr(e, "type", None) == "custom_emoji" and getattr(e, "custom_emoji_id", None)
+        ]
+        if not _is_text_message_for_translation(rest, custom_entities):
+            if custom_entities:
+                items = []
+                seen_ids = set()
+                for e in custom_entities:
+                    cid = str(e.custom_emoji_id)
+                    if cid not in seen_ids:
+                        seen_ids.add(cid)
+                        try:
+                            char = e.extract_from(text)
+                        except Exception:
+                            char = "✨"
+                        items.append((cid, char))
+                await message.reply(strings.custom_emoji_detected_text(items), parse_mode="HTML")
+                return
+            else:
+                await message.reply(strings.standard_emoji_info_text(rest), parse_mode="HTML")
+                return
+
         dst = await services.user_store.get_target(message.from_user.id)
         await run_translation(
             services,
@@ -272,13 +334,13 @@ async def cmd_tr(message: Message, services: Services, bot: Bot) -> None:
             raw_text=rest,
             anchor_message_id=message.message_id,
             dst=dst,
-            username=message.from_user.username,
-            display_name=message.from_user.full_name,
+            username=getattr(message.from_user, "username", None) if message.from_user else None,
+            display_name=getattr(message.from_user, "full_name", None) if message.from_user else None,
         )
         return
 
     # Bare /tr: auto toggle mode needs no language choice.
-    await message.answer(strings.AUTO_MODE)
+    await message.answer(strings.auto_mode_text(), parse_mode="HTML")
 
 
 # ---------------------------------------------------------------------------
@@ -337,6 +399,32 @@ async def on_text(message: Message, services: Services, bot: Bot) -> None:
         await message.reply(strings.ALREADY_TRANSLATED)
         return
 
+    # Check for custom animated emojis or pure emojis
+    entities = message.entities or message.caption_entities or []
+    custom_entities = [
+        e for e in entities
+        if getattr(e, "type", None) == "custom_emoji" and getattr(e, "custom_emoji_id", None)
+    ]
+
+    if not _is_text_message_for_translation(text, custom_entities):
+        if custom_entities:
+            items: list[tuple[str, str]] = []
+            seen_ids = set()
+            for e in custom_entities:
+                cid = str(e.custom_emoji_id)
+                if cid not in seen_ids:
+                    seen_ids.add(cid)
+                    try:
+                        char = e.extract_from(text)
+                    except Exception:
+                        char = "✨"
+                    items.append((cid, char))
+            await message.reply(strings.custom_emoji_detected_text(items), parse_mode="HTML")
+            return
+        else:
+            await message.reply(strings.standard_emoji_info_text(text), parse_mode="HTML")
+            return
+
     # Gate 4 (static allowlist) is subsumed by the Phase 0 group gate above:
     # is_group_member already grants seeded staff/admin. No second check.
 
@@ -350,8 +438,8 @@ async def on_text(message: Message, services: Services, bot: Bot) -> None:
         raw_text=text,
         anchor_message_id=message.message_id,
         dst=dst,
-        username=message.from_user.username,
-        display_name=message.from_user.full_name,
+        username=getattr(message.from_user, "username", None) if message.from_user else None,
+        display_name=getattr(message.from_user, "full_name", None) if message.from_user else None,
     )
 
 
