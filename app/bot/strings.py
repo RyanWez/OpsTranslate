@@ -6,7 +6,7 @@ Locked Rule 1: the only non-English content in the system is translation
 from __future__ import annotations
 
 from .. import config
-from .emojis import get_emoji, get_custom_emoji_id
+from .emojis import get_emoji, get_custom_emoji_id, get_slot_fallback
 
 
 import html
@@ -117,8 +117,8 @@ def translation_header(src: str, dst: str) -> str:
 
 
 def copy_button_text() -> str:
-    icon = get_emoji("copy_button")
-    return f"{icon} Copy" if icon else "Copy"
+    icon = get_slot_fallback("copy_button") or "📋"
+    return f"{icon} Copy"
 
 
 def not_authorized_text(user_id: int) -> str:

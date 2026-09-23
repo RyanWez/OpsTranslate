@@ -50,7 +50,7 @@ DEFAULT_SLOTS: dict[str, EmojiSlot] = {
         label="Copy Button Icon",
         category="Pipeline",
         fallback="📋",
-        description="Icon displayed on the 1-click Copy button",
+        description="Icon displayed on the 1-click Copy button (Unicode Emoji only, e.g. 📋)",
     ),
 
     # Bot Commands
@@ -173,6 +173,15 @@ def get_custom_emoji_id(slot_key: str) -> str | None:
     return None
 
 
+def get_slot_fallback(slot_key: str) -> str:
+    """Return raw Unicode fallback emoji for slots used in buttons/plain-text."""
+    slot = _slots_cache.get(slot_key)
+    if slot and slot.fallback:
+        return slot.fallback
+    default = DEFAULT_SLOTS.get(slot_key)
+    return default.fallback if default else ""
+
+
 async def load_emoji_config() -> dict[str, EmojiSlot]:
     """Load emoji slots from database 'settings' table (key='bot_animated_emojis')."""
     global _initialized, _slots_cache
@@ -252,15 +261,19 @@ async def save_emoji_config(slots_data: dict[str, Any]) -> dict[str, EmojiSlot]:
 
 def get_all_slots() -> list[dict[str, Any]]:
     """Return all slot definitions with current state for Admin UI."""
-    return [
-        {
+    res = []
+    for slot in _slots_cache.values():
+        if slot.key == "copy_button":
+            preview = f"{slot.fallback} Copy"
+        else:
+            preview = get_emoji(slot.key)
+        res.append({
             "key": slot.key,
             "label": slot.label,
             "category": slot.category,
             "fallback": slot.fallback,
             "custom_emoji_id": slot.custom_emoji_id,
             "description": slot.description,
-            "tag_preview": get_emoji(slot.key),
-        }
-        for slot in _slots_cache.values()
-    ]
+            "tag_preview": preview,
+        })
+    return res

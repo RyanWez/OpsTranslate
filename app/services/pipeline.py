@@ -591,6 +591,7 @@ async def run_translation(
         await services.bot.send_message(
             chat_id,
             strings.too_long_text(len(raw_text)),
+            parse_mode="HTML",
             reply_parameters=ReplyParameters(
                 message_id=anchor_message_id, allow_sending_without_reply=True
             ),
@@ -647,6 +648,7 @@ async def run_translation(
                 await services.bot.send_message(
                     chat_id,
                     strings.RATE_LIMIT.format(n=wait_s),
+                    parse_mode="HTML",
                     reply_parameters=ReplyParameters(
                         message_id=anchor_message_id, allow_sending_without_reply=True
                     ),
@@ -663,7 +665,9 @@ async def run_translation(
             used = await services.cache.incr(_today_key(f"softcap:{user_id}"), 86400)
             if used > soft_cap:
                 await services.bot.send_message(
-                    chat_id, strings.DAILY_CAP_REACHED,
+                    chat_id,
+                    strings.DAILY_CAP_REACHED,
+                    parse_mode="HTML",
                     reply_parameters=ReplyParameters(
                         message_id=anchor_message_id, allow_sending_without_reply=True
                     ),

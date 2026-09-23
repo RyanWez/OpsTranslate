@@ -105,6 +105,9 @@ function resetDefaults() {
 }
 
 function previewTag(slot: EmojiSlotItem): string {
+  if (slot.key === 'copy_button') {
+    return `${slot.fallback || '📋'} Copy`
+  }
   const id = (slot.custom_emoji_id || '').trim()
   if (id && /^\d+$/.test(id)) {
     return `<tg-emoji emoji-id="${id}">${slot.fallback}</tg-emoji>`
@@ -194,18 +197,25 @@ onMounted(() => {
                   />
                 </div>
                 <div class="flex-1">
-                  <NInput
-                    v-model:value="slot.custom_emoji_id"
-                    size="small"
-                    placeholder="Custom Emoji ID (e.g. 5368324170671202286)"
-                    class="font-mono text-xs"
-                    clearable
-                  />
+                  <template v-if="slot.key === 'copy_button'">
+                    <span class="text-[11px] text-amber-400/90 italic flex items-center gap-1">
+                      ⚠️ Telegram buttons only support standard Unicode emojis (e.g. 📋, 📑). Custom IDs are not supported on buttons.
+                    </span>
+                  </template>
+                  <template v-else>
+                    <NInput
+                      v-model:value="slot.custom_emoji_id"
+                      size="small"
+                      placeholder="Custom Emoji ID (e.g. 5368324170671202286)"
+                      class="font-mono text-xs"
+                      clearable
+                    />
+                  </template>
                 </div>
               </div>
 
               <div class="md:w-44 text-right">
-                <NTag size="small" :bordered="false" :type="slot.custom_emoji_id ? 'success' : 'default'">
+                <NTag size="small" :bordered="false" :type="slot.key === 'copy_button' ? 'info' : (slot.custom_emoji_id ? 'success' : 'default')">
                   <span class="font-mono text-[11px] truncate max-w-[150px] inline-block">
                     {{ previewTag(slot) }}
                   </span>

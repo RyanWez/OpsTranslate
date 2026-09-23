@@ -285,7 +285,7 @@ async def cmd_tr(message: Message, services: Services, bot: Bot) -> None:
         # /tr as a reply: translate the replied-to message.
         rtext = replied.text or replied.caption or ""
         if not rtext.strip():
-            await message.reply(strings.unsupported_type_text())
+            await message.reply(strings.unsupported_type_text(), parse_mode="HTML")
             return
         dst = await services.user_store.get_target(message.from_user.id)
         await run_translation(
@@ -388,7 +388,7 @@ async def on_text(message: Message, services: Services, bot: Bot) -> None:
 
     # Gate 3: type check (empty text/caption cannot happen here, but be safe).
     if not text.strip():
-        await message.reply(strings.unsupported_type_text())
+        await message.reply(strings.unsupported_type_text(), parse_mode="HTML")
         return
 
     # Reply to a message from the bot: it is already a translation.
