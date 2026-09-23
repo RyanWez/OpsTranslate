@@ -126,6 +126,11 @@ async def cmd_start(message: Message, services: Services) -> None:
     if not await _gate_access(services, message, start_cmd=True):
         return
     await services.user_store.set_target(message.from_user.id, "en")
+    try:
+        from .commands import register_bot_commands
+        asyncio.create_task(register_bot_commands(services.bot))
+    except Exception:
+        pass
     await message.answer(strings.welcome_text())
 
 

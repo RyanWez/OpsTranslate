@@ -129,6 +129,13 @@ async def lifespan(app: FastAPI):
     except Exception:
         log.warning("initial_provider_sync_failed", exc_info=True)
 
+    # Automatically register bot commands in Telegram menu button
+    try:
+        from .bot.commands import register_bot_commands
+        await register_bot_commands(bot)
+    except Exception:
+        log.warning("initial_bot_commands_registration_failed", exc_info=True)
+
     polling_task = None
     shutdown_event = asyncio.Event()
     if config.MODE == "polling":
