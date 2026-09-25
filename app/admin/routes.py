@@ -219,24 +219,36 @@ async def get_overview(request: Request):
 class MaintenancePayload(BaseModel):
     enabled: bool = False
     message: str = Field(default="", max_length=4000)
+    resumed_message: str = Field(default="", max_length=4000)
     title: str = Field(default="", max_length=120)
     allow_admin_bypass: bool = False
+    notify_staff: bool = True
 
 
 @router.get("/maintenance", dependencies=[Depends(require_admin)])
 async def get_maintenance():
     """Return current maintenance mode configuration."""
-    from ..services.maintenance import get_config, DEFAULT_MESSAGE, DEFAULT_TITLE
+    from ..services.maintenance import (
+        get_config,
+        DEFAULT_MESSAGE,
+        DEFAULT_RESUMED_MESSAGE,
+        DEFAULT_TITLE,
+    )
 
     cfg = await get_config(force_refresh=True)
     return {
         "enabled": cfg.enabled,
         "message": cfg.message or DEFAULT_MESSAGE,
+        "resumed_message": cfg.resumed_message or DEFAULT_RESUMED_MESSAGE,
         "title": cfg.title or DEFAULT_TITLE,
         "allow_admin_bypass": cfg.allow_admin_bypass,
         "updated_at": cfg.updated_at,
         "updated_by": cfg.updated_by,
-        "defaults": {"message": DEFAULT_MESSAGE, "title": DEFAULT_TITLE},
+        "defaults": {
+            "message": DEFAULT_MESSAGE,
+            "resumed_message": DEFAULT_RESUMED_MESSAGE,
+            "title": DEFAULT_TITLE,
+        },
     }
 
 
@@ -254,6 +266,10 @@ async def update_maintenance(payload: MaintenancePayload, request: Request):
     except Exception:
         pass
 
+    # Check if enabled state is changing to notify staff
+    current = await get_config()
+    is_state_change = (current.enabled != payload.enabled)
+
     # Validate: message must not be empty when enabling
     if payload.enabled and not payload.message.strip():
         # Allow empty -> service will fall back to DEFAULT_MESSAGE
@@ -262,10 +278,26 @@ async def update_maintenance(payload: MaintenancePayload, request: Request):
     cfg = await set_config(
         enabled=payload.enabled,
         message=payload.message,
+        resumed_message=payload.resumed_message,
         title=payload.title,
         allow_admin_bypass=payload.allow_admin_bypass,
         updated_by=actor_id,
     )
+
+    if is_state_change and payload.notify_staff:
+        bot = getattr(request.app.state, "bot", None)
+        if bot:
+            import asyncio
+            from ..services.maintenance import broadcast_maintenance_notification
+            asyncio.create_task(
+                broadcast_maintenance_notification(
+                    bot,
+                    enabled=payload.enabled,
+                    custom_message=payload.message,
+                    custom_resumed_message=payload.resumed_message,
+                )
+            )
+
     return {"ok": True, "maintenance": cfg.to_dict()}
 
 
@@ -1409,7 +1441,8 @@ async def test_bot_emojis_endpoint(request: Request):
         f"• Warning: {get_emoji('warning')}\n"
         f"• Rate Limit: {get_emoji('rate_limit')}\n"
         f"• Unauthorized: {get_emoji('unauthorized')}\n"
-        f"• Maintenance: {get_emoji('maintenance')}"
+        f"• Maintenance: {get_emoji('maintenance')}\n"
+        f"• Resumed: {get_emoji('service_resumed')}"
     )
 
     try:

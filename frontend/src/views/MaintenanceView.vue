@@ -20,10 +20,13 @@ const saving = ref(false)
 const enabled = ref(false)
 const title = ref('')
 const msgText = ref('')
+const resumedMsgText = ref('')
 const allowAdminBypass = ref(false)
+const notifyStaff = ref(true)
 
 // Defaults from server
 const defaultMessage = ref('')
+const defaultResumedMessage = ref('')
 const defaultTitle = ref('')
 const updatedAt = ref<string | null>(null)
 
@@ -36,7 +39,11 @@ const messageError = computed(() => {
   if (msgText.value.length > 4000) return 'Message must be ≤ 4000 characters'
   return ''
 })
-const canSave = computed(() => !titleError.value && !messageError.value)
+const resumedMessageError = computed(() => {
+  if (resumedMsgText.value.length > 4000) return 'Resumed message must be ≤ 4000 characters'
+  return ''
+})
+const canSave = computed(() => !titleError.value && !messageError.value && !resumedMessageError.value)
 
 async function fetchMaintenance() {
   loading.value = true
@@ -45,11 +52,13 @@ async function fetchMaintenance() {
     const d = res.data as any
     enabled.value = !!d.enabled
     msgText.value = d.message || ''
+    resumedMsgText.value = d.resumed_message || ''
     title.value = d.title || ''
     allowAdminBypass.value = !!d.allow_admin_bypass
     updatedAt.value = d.updated_at || null
     if (d.defaults) {
       defaultMessage.value = d.defaults.message || ''
+      defaultResumedMessage.value = d.defaults.resumed_message || ''
       defaultTitle.value = d.defaults.title || ''
     }
   } catch (err: any) {
@@ -66,15 +75,22 @@ async function save() {
     const res = await apiClient.put('/maintenance', {
       enabled: enabled.value,
       message: msgText.value,
+      resumed_message: resumedMsgText.value,
       title: title.value,
       allow_admin_bypass: allowAdminBypass.value,
+      notify_staff: notifyStaff.value,
     })
     const d = (res.data as any).maintenance || (res.data as any)
     if (d) {
       enabled.value = !!d.enabled
       updatedAt.value = d.updated_at || null
     }
-    message.success(enabled.value ? 'Maintenance mode ENABLED — bot will show the custom notice.' : 'Maintenance mode disabled — bot is live again.')
+    const broadcastNotice = notifyStaff.value ? ' (Staff broadcast sent)' : ''
+    message.success(
+      enabled.value
+        ? `Maintenance mode ENABLED — bot will show custom notice.${broadcastNotice}`
+        : `Maintenance mode disabled — bot is live again.${broadcastNotice}`
+    )
   } catch (err: any) {
     message.error('Save failed: ' + (err.response?.data?.detail || err.message))
   } finally {
@@ -86,7 +102,9 @@ function toggleEnabled(val: boolean) {
   if (val) {
     dialog.warning({
       title: 'Enable Maintenance Mode?',
-      content: 'Telegram bot will stop translating and show your custom maintenance message to all users (admins can still bypass if enabled). Provider costs will be zero while enabled.',
+      content: notifyStaff.value
+        ? 'Telegram bot will enter maintenance and broadcast a notice to all staff users. Translation will be paused.'
+        : 'Telegram bot will enter maintenance. Translation will be paused.',
       positiveText: 'Enable',
       negativeText: 'Cancel',
       onPositiveClick: () => {
@@ -100,7 +118,9 @@ function toggleEnabled(val: boolean) {
   } else {
     dialog.info({
       title: 'Disable Maintenance Mode?',
-      content: 'Bot will resume normal translation for all users.',
+      content: notifyStaff.value
+        ? 'Bot will resume translation and broadcast a "Back Online" notice to staff users.'
+        : 'Bot will resume translation for all users.',
       positiveText: 'Disable',
       negativeText: 'Cancel',
       onPositiveClick: () => {
@@ -116,6 +136,7 @@ function toggleEnabled(val: boolean) {
 
 function restoreDefaults() {
   msgText.value = defaultMessage.value
+  resumedMsgText.value = defaultResumedMessage.value
   title.value = defaultTitle.value
   message.info('Restored defaults — click Save to apply.')
 }
@@ -204,6 +225,15 @@ onMounted(() => {
         <div class="text-[11px] text-gray-500 mt-1 ml-6">
           Admins (role = admin in Staff Access) will still get translations. <code>/whoami</code> always works.
         </div>
+
+        <div class="mt-3 flex items-center gap-2">
+          <NCheckbox v-model:checked="notifyStaff">
+            <span class="text-xs text-gray-300">Broadcast notification to <b class="text-emerald-400">Staff Users</b> on ON / OFF</span>
+          </NCheckbox>
+        </div>
+        <div class="text-[11px] text-gray-500 mt-1 ml-6">
+          When toggling ON, sends system update notice. When toggling OFF, announces that the bot is back online and ready for translation.
+        </div>
       </NCard>
 
       <!-- Title -->
@@ -239,12 +269,12 @@ onMounted(() => {
           v-model:value="msgText"
           type="textarea"
           :autosize="{ minRows: 5, maxRows: 12 }"
-          placeholder="🔧 Bot ကို Update လုပ်နေပါတယ်&#10;&#10;လောလောဆယ် ဘာသာပြန်ဝန်ဆောင်မှု ခေတ္တ ရပ်ဆိုင်းထားပါတယ်။&#10;မကြာခင် ပြန်လည်အသုံးပြုနိုင်ပါမယ် — ခဏစောင့်ပေးပါ။"
+          placeholder="🔧 <b>Bot is under maintenance</b>&#10;&#10;Translation service is temporarily unavailable.&#10;Please try again in a few minutes."
           :status="messageError ? 'error' : undefined"
         />
         <div v-if="messageError" class="text-[11px] text-red-400 mt-1">{{ messageError }}</div>
         <div class="text-[11px] text-gray-500 mt-2 leading-relaxed">
-          Tip: You can include Burmese + English. Telegram HTML is supported — <code>&lt;b&gt;bold&lt;/b&gt;</code>, <code>&lt;i&gt;italic&lt;/i&gt;</code>, <code>&lt;code&gt;</code>, and Telegram Premium animated emojis <code>&lt;tg-emoji emoji-id="..."&gt;🔧&lt;/tg-emoji&gt;</code> (or configure under <router-link to="/emojis" class="text-cyan-400 hover:underline">Animated Emojis</router-link>). Leave empty to use the built-in default.
+          Tip: Telegram HTML is supported — <code>&lt;b&gt;bold&lt;/b&gt;</code>, <code>&lt;i&gt;italic&lt;/i&gt;</code>, <code>&lt;code&gt;</code>, and Telegram Premium animated emojis <code>&lt;tg-emoji emoji-id="..."&gt;🔧&lt;/tg-emoji&gt;</code> (or configure under <router-link to="/emojis" class="text-cyan-400 hover:underline">Animated Emojis</router-link>). Leave empty to use the built-in default.
         </div>
 
         <!-- Preview -->
@@ -257,6 +287,43 @@ onMounted(() => {
             v-html="previewHtml(msgText || defaultMessage)"
           ></div>
           <div v-if="!msgText.trim()" class="text-[11px] text-gray-500 mt-2 italic">Showing default message (your field is empty).</div>
+        </div>
+      </NCard>
+
+      <!-- Resumed Message (Back Online) -->
+      <NCard size="small" class="border border-gray-800 bg-gray-900/40 mt-4">
+        <template #header>
+          <div class="flex items-center justify-between w-full">
+            <div>
+              <span class="text-sm font-semibold text-gray-200">Service Resumed Message (Bot is back online)</span>
+              <span class="text-[11px] text-gray-500 ml-2">Broadcasted to staff when maintenance is turned OFF — HTML allowed</span>
+            </div>
+            <span class="text-[11px] font-mono text-gray-500">{{ resumedMsgText.length }} / 4000</span>
+          </div>
+        </template>
+
+        <NInput
+          v-model:value="resumedMsgText"
+          type="textarea"
+          :autosize="{ minRows: 4, maxRows: 10 }"
+          placeholder="🟢 <b>Bot is back online</b>&#10;&#10;Maintenance is complete and translations are fully restored.&#10;You can continue sending messages to translate normally."
+          :status="resumedMessageError ? 'error' : undefined"
+        />
+        <div v-if="resumedMessageError" class="text-[11px] text-red-400 mt-1">{{ resumedMessageError }}</div>
+        <div class="text-[11px] text-gray-500 mt-2 leading-relaxed">
+          Tip: Customize the message sent to Staff users when you turn maintenance OFF. Any standard <code>🟢</code> automatically upgrades to your custom animated emoji from <router-link to="/emojis" class="text-cyan-400 hover:underline">Animated Emojis</router-link>.
+        </div>
+
+        <!-- Preview -->
+        <div class="mt-4 rounded-lg border border-gray-800 bg-[#0b0f19] p-4">
+          <div class="text-[11px] font-semibold tracking-wider text-gray-500 uppercase flex items-center gap-1.5 mb-2">
+            <EyeOutline class="w-3.5 h-3.5" /> Preview (as Telegram renders HTML)
+          </div>
+          <div
+            class="text-sm leading-relaxed whitespace-pre-wrap break-words text-gray-200"
+            v-html="previewHtml(resumedMsgText || defaultResumedMessage)"
+          ></div>
+          <div v-if="!resumedMsgText.trim()" class="text-[11px] text-gray-500 mt-2 italic">Showing default resumed message (your field is empty).</div>
         </div>
       </NCard>
 

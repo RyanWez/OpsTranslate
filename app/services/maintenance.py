@@ -28,14 +28,17 @@ log = logging.getLogger("opstranslate.maintenance")
 
 SETTING_KEY = "maintenance_mode"
 
-# Default message — Burmese + English, shown when admin has not customised.
+# Default message — clean English, shown when admin has not customised.
 DEFAULT_MESSAGE: str = (
-    "🔧 <b>Bot ကို Update လုပ်နေပါတယ်</b>\n\n"
-    "လောလောဆယ် ဘာသာပြန်ဝန်ဆောင်မှု ခေတ္တ ရပ်ဆိုင်းထားပါတယ်။\n"
-    "မကြာခင် ပြန်လည်အသုံးပြုနိုင်ပါမယ် — ခဏစောင့်ပေးပါ။\n\n"
     "🔧 <b>Bot is under maintenance</b>\n\n"
     "Translation service is temporarily unavailable.\n"
     "Please try again in a few minutes."
+)
+
+DEFAULT_RESUMED_MESSAGE: str = (
+    "🟢 <b>Bot is back online</b>\n\n"
+    "Maintenance is complete and translations are fully restored.\n"
+    "You can continue sending messages to translate normally."
 )
 
 DEFAULT_TITLE: str = "Under Maintenance"
@@ -45,6 +48,7 @@ DEFAULT_TITLE: str = "Under Maintenance"
 class MaintenanceConfig:
     enabled: bool = False
     message: str = DEFAULT_MESSAGE
+    resumed_message: str = DEFAULT_RESUMED_MESSAGE
     allow_admin_bypass: bool = False
     title: str = DEFAULT_TITLE
     updated_at: str | None = None
@@ -60,6 +64,7 @@ class MaintenanceConfig:
         return cls(
             enabled=bool(data.get("enabled", False)),
             message=str(data.get("message") or DEFAULT_MESSAGE).strip() or DEFAULT_MESSAGE,
+            resumed_message=str(data.get("resumed_message") or DEFAULT_RESUMED_MESSAGE).strip() or DEFAULT_RESUMED_MESSAGE,
             allow_admin_bypass=bool(data.get("allow_admin_bypass", False)),
             title=str(data.get("title") or DEFAULT_TITLE).strip() or DEFAULT_TITLE,
             updated_at=data.get("updated_at"),
@@ -186,6 +191,7 @@ async def set_config(
     *,
     enabled: bool,
     message: str | None = None,
+    resumed_message: str | None = None,
     title: str | None = None,
     allow_admin_bypass: bool | None = None,
     updated_by: int | None = None,
@@ -197,6 +203,7 @@ async def set_config(
     new_cfg = MaintenanceConfig(
         enabled=enabled,
         message=(message.strip() if isinstance(message, str) and message.strip() else current.message),
+        resumed_message=(resumed_message.strip() if isinstance(resumed_message, str) and resumed_message.strip() else current.resumed_message),
         title=(title.strip() if isinstance(title, str) and title.strip() else current.title),
         allow_admin_bypass=allow_admin_bypass if allow_admin_bypass is not None else current.allow_admin_bypass,
         updated_by=updated_by,
@@ -205,6 +212,8 @@ async def set_config(
     # Ensure non-empty
     if not new_cfg.message.strip():
         new_cfg.message = DEFAULT_MESSAGE
+    if not new_cfg.resumed_message.strip():
+        new_cfg.resumed_message = DEFAULT_RESUMED_MESSAGE
     if not new_cfg.title.strip():
         new_cfg.title = DEFAULT_TITLE
 
@@ -225,3 +234,73 @@ async def set_config(
 
     log.info("maintenance_config_updated: enabled=%s by=%s", enabled, updated_by)
     return new_cfg
+
+
+async def broadcast_maintenance_notification(
+    bot,
+    *,
+    enabled: bool,
+    custom_message: str | None = None,
+    custom_resumed_message: str | None = None,
+) -> int:
+    """Broadcast maintenance status change (ON / OFF) to all active staff users and ops group."""
+    import asyncio
+    from .. import config as configmod
+    from ..bot import strings as stringsmod
+
+    # 1. Determine recipients
+    user_ids: set[int] = set()
+
+    # Query DB for all active allowed users and registered users
+    from ..store import db as dbmod
+    if dbmod.is_configured():
+        try:
+            from sqlalchemy import select
+            from ..store.models import AllowedUser, UserSettings
+
+            async with dbmod.session() as sess:
+                res = await sess.execute(select(AllowedUser.user_id).where(AllowedUser.active.is_(True)))
+                for uid in res.scalars():
+                    user_ids.add(int(uid))
+                res = await sess.execute(select(UserSettings.user_id))
+                for uid in res.scalars():
+                    user_ids.add(int(uid))
+        except Exception as exc:
+            log.warning("broadcast_fetch_recipients_failed: %s", exc)
+
+    # Seed lists from config
+    for uid in getattr(configmod, "ADMIN_USER_IDS", []):
+        user_ids.add(int(uid))
+    for uid in getattr(configmod, "ALLOWED_USER_IDS", []):
+        user_ids.add(int(uid))
+
+    chat_ids: list[int] = list(user_ids)
+    group_id = getattr(configmod, "GROUP_CHAT_ID", None)
+    if group_id and group_id not in chat_ids:
+        chat_ids.append(group_id)
+
+    if not chat_ids or not bot:
+        log.info("broadcast_maintenance_skipped: recipients=%d bot=%s", len(chat_ids), bool(bot))
+        return 0
+
+    # 2. Build message text
+    if enabled:
+        text = stringsmod.maintenance_broadcast_on_text(custom_message)
+    else:
+        if not custom_resumed_message:
+            cfg = await get_config()
+            custom_resumed_message = cfg.resumed_message
+        text = stringsmod.maintenance_broadcast_off_text(custom_resumed_message)
+
+    # 3. Broadcast to all recipients
+    sent_count = 0
+    for cid in chat_ids:
+        try:
+            await bot.send_message(chat_id=cid, text=text, parse_mode="HTML")
+            sent_count += 1
+            await asyncio.sleep(0.04)  # 25 msgs/sec limit for Telegram anti-flood
+        except Exception as exc:
+            log.debug("broadcast_maintenance_to_%s_failed: %s", cid, exc)
+
+    log.info("broadcast_maintenance_finished: enabled=%s sent=%d/%d", enabled, sent_count, len(chat_ids))
+    return sent_count

@@ -147,6 +147,13 @@ DEFAULT_SLOTS: dict[str, EmojiSlot] = {
         fallback="🔧",
         description="Wrench / Update icon in maintenance notices and admin bypass tags",
     ),
+    "service_resumed": EmojiSlot(
+        key="service_resumed",
+        label="Service Resumed / Bot Online",
+        category="Alerts",
+        fallback="🟢",
+        description="Icon in notifications sent to staff when maintenance ends and bot is back online",
+    ),
 }
 
 # In-memory fast cache

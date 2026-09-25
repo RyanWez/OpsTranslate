@@ -18,6 +18,7 @@ BOT_ID = 777
 def _setup_env(monkeypatch):
     monkeypatch.setattr(config, "ADMIN_USER_IDS", [ADMIN_ID])
     monkeypatch.setattr(config, "TEST_ALLOW_ALL", True)
+    monkeypatch.setattr(config, "GROUP_CHAT_ID", 0)
     monkeypatch.setattr("app.store.db.is_configured", lambda: False)
     handlers._bot_id_cache.clear()
     maintenance.invalidate_cache()
@@ -157,3 +158,87 @@ async def test_maintenance_uses_animated_emoji_when_configured(monkeypatch):
         assert '<tg-emoji emoji-id="54321987654321">🔧</tg-emoji>' in rendered
     finally:
         emojis._slots_cache["maintenance"].custom_emoji_id = ""
+
+
+@pytest.mark.asyncio
+async def test_broadcast_maintenance_notification_on(monkeypatch):
+    """Broadcasting ON delivers the update notice to configured recipients."""
+    monkeypatch.setattr(config, "ADMIN_USER_IDS", [ADMIN_ID])
+    monkeypatch.setattr(config, "ALLOWED_USER_IDS", [STAFF_ID])
+    bot = FakeBot(me_id=BOT_ID)
+
+    sent_count = await maintenance.broadcast_maintenance_notification(
+        bot,
+        enabled=True,
+        custom_message="Database migration in progress",
+    )
+    assert sent_count == 2
+    assert len(bot.sent) == 2
+    chat_ids = {c.chat_id for c in bot.sent}
+    assert chat_ids == {ADMIN_ID, STAFF_ID}
+    for call in bot.sent:
+        assert "Database migration in progress" in call.text
+
+
+@pytest.mark.asyncio
+async def test_broadcast_maintenance_notification_off(monkeypatch):
+    """Broadcasting OFF delivers the service resumed notice to configured recipients."""
+    monkeypatch.setattr(config, "ADMIN_USER_IDS", [ADMIN_ID])
+    monkeypatch.setattr(config, "ALLOWED_USER_IDS", [STAFF_ID])
+    bot = FakeBot(me_id=BOT_ID)
+
+    sent_count = await maintenance.broadcast_maintenance_notification(
+        bot,
+        enabled=False,
+    )
+    assert sent_count == 2
+    assert len(bot.sent) == 2
+    chat_ids = {c.chat_id for c in bot.sent}
+    assert chat_ids == {ADMIN_ID, STAFF_ID}
+    for call in bot.sent:
+        assert "Bot is back online" in call.text
+        assert "Maintenance is complete" in call.text
+
+
+@pytest.mark.asyncio
+async def test_broadcast_maintenance_notification_off_custom(monkeypatch):
+    """Broadcasting OFF with a custom resumed message uses the custom message verbatim."""
+    monkeypatch.setattr(config, "ADMIN_USER_IDS", [ADMIN_ID])
+    monkeypatch.setattr(config, "ALLOWED_USER_IDS", [])
+    bot = FakeBot(me_id=BOT_ID)
+
+    sent_count = await maintenance.broadcast_maintenance_notification(
+        bot,
+        enabled=False,
+        custom_resumed_message="🟢 All services restored and operational!",
+    )
+    assert sent_count == 1
+    assert "All services restored and operational!" in bot.sent[0].text
+
+
+@pytest.mark.asyncio
+async def test_service_resumed_uses_animated_emoji(monkeypatch):
+    """When a custom animated emoji is configured for service_resumed, it upgrades 🟢."""
+    from app.bot import emojis, strings
+    emojis._slots_cache["service_resumed"].custom_emoji_id = "9876543210"
+    try:
+        text = strings.maintenance_broadcast_off_text()
+        assert '<tg-emoji emoji-id="9876543210">🟢</tg-emoji>' in text
+    finally:
+        emojis._slots_cache["service_resumed"].custom_emoji_id = ""
+
+
+@pytest.mark.asyncio
+async def test_broadcast_maintenance_includes_group_chat_id(monkeypatch):
+    """Broadcasting includes GROUP_CHAT_ID if configured."""
+    monkeypatch.setattr(config, "ADMIN_USER_IDS", [ADMIN_ID])
+    monkeypatch.setattr(config, "ALLOWED_USER_IDS", [])
+    monkeypatch.setattr(config, "GROUP_CHAT_ID", -100123456789)
+    bot = FakeBot(me_id=BOT_ID)
+
+    sent = await maintenance.broadcast_maintenance_notification(bot, enabled=True)
+    assert sent == 2
+    chat_ids = {c.chat_id for c in bot.sent}
+    assert chat_ids == {ADMIN_ID, -100123456789}
+
+

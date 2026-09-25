@@ -150,12 +150,39 @@ def maintenance_text(custom: str | None = None) -> str:
             text = text.replace("🔧", maint_icon)
         return text
     return (
-        f"{maint_icon} <b>Bot ကို Update လုပ်နေပါတယ်</b>\n\n"
-        "လောလောဆယ် ဘာသာပြန်ဝန်ဆောင်မှု ခေတ္တ ရပ်ဆိုင်းထားပါတယ်။\n"
-        "မကြာခင် ပြန်လည်အသုံးပြုနိုင်ပါမယ် — ခဏစောင့်ပေးပါ။\n\n"
         f"{maint_icon} <b>Bot is under maintenance</b>\n\n"
         "Translation service is temporarily unavailable.\n"
         "Please try again in a few minutes."
+    )
+
+
+def maintenance_broadcast_on_text(custom: str | None = None) -> str:
+    """Return broadcast message sent to staff users when maintenance mode is turned ON."""
+    maint_icon = get_emoji("maintenance")
+    if custom and custom.strip():
+        text = custom.strip()
+        if maint_icon != "🔧":
+            text = text.replace("🔧", maint_icon)
+        return text
+    return (
+        f"{maint_icon} <b>Bot is under maintenance</b>\n\n"
+        "System update has started. Translation service is temporarily paused.\n"
+        "We will notify you once maintenance is complete."
+    )
+
+
+def maintenance_broadcast_off_text(custom: str | None = None) -> str:
+    """Return broadcast message sent to staff users when maintenance mode is turned OFF (resumed)."""
+    online_icon = get_emoji("service_resumed")
+    if custom and custom.strip():
+        text = custom.strip()
+        if online_icon != "🟢":
+            text = text.replace("🟢", online_icon)
+        return text
+    return (
+        f"{online_icon} <b>Bot is back online</b>\n\n"
+        "Maintenance is complete and translations are fully restored.\n"
+        "You can continue sending messages to translate normally."
     )
 
 
