@@ -791,7 +791,7 @@ const tableColumns = [
             <div class="min-w-0">
               <div class="flex items-center space-x-2">
                 <span class="text-xs font-semibold text-gray-100 truncate">
-                  {{ item.display_name || 'Staff User' }}
+                  {{ item.display_name || `UID ${item.user_id}` }}
                 </span>
                 <a
                   v-if="item.username"
@@ -802,6 +802,7 @@ const tableColumns = [
                 >
                   @{{ item.username.replace(/^@/, '') }}
                 </a>
+                <span v-else class="text-[10px] text-gray-500 font-mono">ID: {{ item.user_id }}</span>
               </div>
               <div class="text-[10px] text-gray-500 font-mono">
                 UID: {{ item.user_id }}
@@ -966,7 +967,7 @@ const tableColumns = [
             <div class="flex items-center justify-between">
               <span class="text-gray-400 font-medium">Staff Member</span>
               <span class="font-semibold text-gray-100">
-                {{ historyStore.selectedItem.display_name || 'Staff User' }}
+                {{ historyStore.selectedItem.display_name || `UID ${historyStore.selectedItem.user_id}` }}
               </span>
             </div>
             <div v-if="historyStore.selectedItem.username" class="flex items-center justify-between">

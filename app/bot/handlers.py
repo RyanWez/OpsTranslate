@@ -37,6 +37,7 @@ from aiogram.types import (
 from . import strings
 from .. import config as configmod
 from .groupgate import status_of, drop_cached_verdict, is_group_member
+from ..services.maintenance import get_config as get_maintenance_config
 from ..services.pipeline import Services, run_translation
 
 log = logging.getLogger("opstranslate.handlers")
@@ -142,6 +143,40 @@ async def _gate_allowlist(services: Services, user_id: int) -> tuple[bool, str]:
     return await services.user_store.is_allowed(user_id)
 
 
+async def _check_maintenance(
+    services: Services, message: Message
+) -> bool:
+    """Return True if maintenance is active and the user should be blocked.
+
+    Admins are exempt when ``allow_admin_bypass`` is enabled.  When blocked
+    the maintenance notice is sent and the caller should ``return``.
+    """
+    try:
+        cfg = await get_maintenance_config()
+        if not cfg.enabled:
+            return False
+        # Admin bypass
+        if cfg.allow_admin_bypass:
+            try:
+                _, role = await services.user_store.is_allowed(message.from_user.id)
+                if role == "admin":
+                    return False
+            except Exception:
+                pass
+            # Also check env-seeded admins
+            if message.from_user.id in configmod.ADMIN_USER_IDS:
+                return False
+        try:
+            await message.answer(strings.maintenance_text(cfg.message), parse_mode="HTML")
+        except Exception:
+            pass
+        log.info("maintenance_blocked user=%s", message.from_user.id)
+        return True
+    except Exception:
+        log.warning("maintenance_check_failed", exc_info=True)
+        return False
+
+
 # ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
@@ -151,6 +186,8 @@ async def cmd_start(message: Message, services: Services) -> None:
     # Fresh lookup: a user added to the group must get in on the first
     # /start, never wait out a cached deny from before they joined.
     if not await _gate_access(services, message, start_cmd=True):
+        return
+    if await _check_maintenance(services, message):
         return
     await services.user_store.set_target(message.from_user.id, "en")
     try:
@@ -169,6 +206,8 @@ async def cmd_start(message: Message, services: Services) -> None:
 @router.message(Command("help"))
 async def cmd_help(message: Message, services: Services) -> None:
     if not await _gate_access(services, message):
+        return
+    if await _check_maintenance(services, message):
         return
     await message.answer(strings.help_text(), parse_mode="HTML")
 
@@ -251,6 +290,8 @@ async def cmd_report(message: Message, services: Services) -> None:
     """
     if not await _gate_access(services, message):
         return
+    if await _check_maintenance(services, message):
+        return
 
     reply = message.reply_to_message
     _, note = _strip_command(message.text or "")
@@ -276,6 +317,8 @@ async def cmd_report(message: Message, services: Services) -> None:
 @router.message(Command("tr"))
 async def cmd_tr(message: Message, services: Services, bot: Bot) -> None:
     if not await _gate_access(services, message):
+        return
+    if await _check_maintenance(services, message):
         return
 
     text = message.text or ""
@@ -383,6 +426,8 @@ async def on_text(message: Message, services: Services, bot: Bot) -> None:
     # This runs BEFORE the type check so non-members never even learn the
     # bot only handles text - the bot is fully invisible to outsiders.
     if not await _gate_access(services, message):
+        return
+    if await _check_maintenance(services, message):
         return
 
     text = message.text or message.caption or ""

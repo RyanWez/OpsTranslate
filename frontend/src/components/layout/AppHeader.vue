@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useAuthStore } from '../../stores/auth'
+import { computed } from 'vue'
 import { useOverviewStore } from '../../stores/overview'
 import { useProvidersStore } from '../../stores/providers'
 import { useLogsStore } from '../../stores/logs'
@@ -15,6 +16,9 @@ const overviewStore = useOverviewStore()
 const providersStore = useProvidersStore()
 const logsStore = useLogsStore()
 const realtimeStore = useRealtimeStore()
+
+const maintenanceActive = computed(() => !!overviewStore.stats?.maintenance?.enabled)
+const maintenanceTitle = computed(() => overviewStore.stats?.maintenance?.title || 'Maintenance active')
 
 const serverClock = ref<string>('')
 let timer: any = null
@@ -82,6 +86,25 @@ function handleLogout() {
 
     <!-- Right: Server Time, Status, Refresh & Logout -->
     <div class="flex items-center space-x-2 sm:space-x-3">
+      <!-- Global maintenance badge (header) -->
+      <router-link
+        v-if="maintenanceActive"
+        to="/maintenance"
+        class="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 hover:bg-amber-500/25 transition"
+        :title="maintenanceTitle"
+      >
+        <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+        <span class="text-xs font-semibold text-amber-300">Maintenance</span>
+      </router-link>
+      <router-link
+        v-if="maintenanceActive"
+        to="/maintenance"
+        class="sm:hidden flex items-center justify-center w-7 h-7 rounded-full bg-amber-500/15 border border-amber-500/30"
+        title="Maintenance active"
+      >
+        <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+      </router-link>
+
       <!-- Live SSE status indicator -->
       <div
         v-if="realtimeStore.isConnected"

@@ -120,6 +120,30 @@ const latencyArea = computed(() => {
 
 <template>
   <div class="space-y-6 max-w-7xl mx-auto">
+    <!-- Maintenance banner (global, live) -->
+    <div
+      v-if="stats?.maintenance?.enabled"
+      class="flex items-center justify-between gap-3 rounded-xl border border-amber-700/40 bg-amber-950/30 px-4 py-3"
+    >
+      <div class="flex items-center gap-2.5 min-w-0">
+        <span class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse shrink-0"></span>
+        <div class="min-w-0">
+          <div class="text-sm font-semibold text-amber-200 truncate">
+            🔧 Maintenance Mode is ACTIVE — {{ stats.maintenance.title || 'Bot is under maintenance' }}
+          </div>
+          <div class="text-[11px] text-amber-200/60 truncate hidden sm:block">
+            Translations are paused. Users see your custom notice. Manage in Maintenance page.
+          </div>
+        </div>
+      </div>
+      <router-link
+        to="/maintenance"
+        class="shrink-0 rounded-lg bg-amber-500 text-amber-950 px-3 py-1.5 text-xs font-bold hover:bg-amber-400 transition"
+      >
+        Manage
+      </router-link>
+    </div>
+
     <!-- Page Header -->
     <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
       <div>

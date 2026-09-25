@@ -136,6 +136,24 @@ def rate_limit_text(n: int) -> str:
     )
 
 
+def maintenance_text(custom: str | None = None) -> str:
+    """Return the maintenance notice sent to users.
+
+    If *custom* is provided (DB-configured message) it is returned verbatim
+    (HTML allowed).  Otherwise a sensible bilingual default is used.
+    """
+    if custom and custom.strip():
+        return custom.strip()
+    return (
+        "🔧 <b>Bot ကို Update လုပ်နေပါတယ်</b>\n\n"
+        "လောလောဆယ် ဘာသာပြန်ဝန်ဆောင်မှု ခေတ္တ ရပ်ဆိုင်းထားပါတယ်။\n"
+        "မကြာခင် ပြန်လည်အသုံးပြုနိုင်ပါမယ် — ခဏစောင့်ပေးပါ။\n\n"
+        "🔧 <b>Bot is under maintenance</b>\n\n"
+        "Translation service is temporarily unavailable.\n"
+        "Please try again in a few minutes."
+    )
+
+
 def auto_mode_text() -> str:
     toggle = get_emoji("auto_mode")
     arrow = get_emoji("arrow")

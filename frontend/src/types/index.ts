@@ -19,6 +19,15 @@ export interface TelemetryData {
   points: TelemetryPoint[]
 }
 
+export interface MaintenanceState {
+  enabled: boolean
+  message: string
+  title: string
+  allow_admin_bypass: boolean
+  updated_at?: string | null
+  updated_by?: number | null
+}
+
 export interface OverviewStats {
   status: string
   mode: string
@@ -34,6 +43,7 @@ export interface OverviewStats {
   today_spend_usd: number
   server_time: string
   telemetry?: TelemetryData
+  maintenance?: MaintenanceState | null
 }
 
 export interface ProviderItem {

@@ -442,6 +442,34 @@ async def _delete_placeholder(services: Services, chat_id: int, placeholder_id: 
 # Usage logging (metadata only - NEVER message text)
 # ---------------------------------------------------------------------------
 
+_TEST_POLLUTION_UIDS = {11, 22, 999, 12345, 999111, 111222}
+
+
+def _is_test_pollution(fields: dict, provider_hint: str | None = None) -> bool:
+    """Return True if this call is a test double hitting the production DB.
+
+    Tests use FakeBot/StubRouter and short synthetic UIDs (11, 22, 999...).
+    The real bot never emits provider='stub'/'default' with those UIDs.
+    Skipping the DB write prevents production history/logs from being
+    polluted with thousands of synthetic 'second message here' rows while
+    still keeping in-memory telemetry for assertions.
+    """
+    provider = provider_hint or fields.get("provider") or ""
+    # StubRouter default name is 'stub' (tests/fakes.py). 'default' is also
+    # synthetic (failure paths). Real providers are named like 'Unikey-sup',
+    # 'vsllm', 'Code Craft', etc.
+    if provider in ("stub", "default") and fields.get("user_id") in _TEST_POLLUTION_UIDS:
+        return True
+    # Also catch provider=None synthetic paths for those UIDs (rate_limited,
+    # too_long, etc. via stub path still writes a usage_log).
+    if provider in ("", "stub", "default", "cache") and fields.get("user_id") in _TEST_POLLUTION_UIDS:
+        # Only suppress DB if there is no display_name/username that proves
+        # it's a real discovered staff (real staff always have names by now).
+        if not fields.get("display_name") and not fields.get("username"):
+            return True
+    return False
+
+
 async def log_usage(services: Services, **fields) -> None:
     user_id = fields.get("user_id")
     if user_id and not fields.get("display_name"):
@@ -459,6 +487,14 @@ async def log_usage(services: Services, **fields) -> None:
 
     from ..store import db as dbmod
     from ..store.models import UsageLog
+
+    # Guard: never let test doubles write to the production DB
+    if _is_test_pollution(fields):
+        try:
+            services.stats.record_usage_log(fields)
+        except Exception:
+            pass
+        return
 
     if dbmod.is_configured():
         try:
@@ -511,19 +547,59 @@ async def record_translation_history(
     if not dbmod.is_configured():
         return
 
-    # Fallback user lookup if display_name/username were not provided
-    if user_id and not display_name:
-        try:
-            if hasattr(services.user_store, "_discovered_users") and user_id in services.user_store._discovered_users:
-                u = services.user_store._discovered_users[user_id]
-                display_name = u.get("display_name")
-                username = u.get("username") or username
-            elif hasattr(services.user_store, "_seed_admin") and user_id in services.user_store._seed_admin:
-                display_name = "Admin (Env)"
-            elif hasattr(services.user_store, "_seed_staff") and user_id in services.user_store._seed_staff:
-                display_name = "Staff (Env)"
-        except Exception:
-            pass
+    # Fallback user lookup if display_name/username were not provided.
+    # Order: AllowedUser DB row (real name) -> in-memory discovered -> env seed.
+    # Previous code only checked in-memory/env and missed DB rows, so history
+    # for real staff (e.g. in Staff Access) was saved with NULL names.
+    if not display_name or not username:
+        # 1) Try DB AllowedUser row (most accurate, survives restarts)
+        if dbmod.is_configured():
+            try:
+                from sqlalchemy import select as _sel_hist
+
+                from ..store.models import AllowedUser as _AU2
+
+                async with dbmod.session() as _sess2:
+                    _row = (
+                        await _sess2.execute(_sel_hist(_AU2).where(_AU2.user_id == user_id))
+                    ).scalar_one_or_none()
+                    if _row is not None:
+                        if not display_name and _row.display_name:
+                            display_name = _row.display_name
+                        if not username and _row.username:
+                            username = _row.username
+            except Exception:
+                pass
+        # 2) In-memory discovered
+        if (not display_name or not username):
+            try:
+                if hasattr(services.user_store, "_discovered_users") and user_id in services.user_store._discovered_users:
+                    u = services.user_store._discovered_users[user_id]
+                    if not display_name:
+                        display_name = u.get("display_name")
+                    if not username:
+                        username = u.get("username") or username
+                elif hasattr(services.user_store, "_seed_admin") and user_id in services.user_store._seed_admin:
+                    display_name = display_name or "Admin (Env)"
+                elif hasattr(services.user_store, "_seed_staff") and user_id in services.user_store._seed_staff:
+                    display_name = display_name or "Staff (Env)"
+            except Exception:
+                pass
+        # 3) Env seed fallback
+        if not display_name:
+            try:
+                from .. import config as _cfg2
+
+                if user_id in getattr(_cfg2, "ADMIN_USER_IDS", []):
+                    display_name = "Admin (Env)"
+                elif user_id in getattr(_cfg2, "ALLOWED_USER_IDS", []):
+                    display_name = "Staff (Env)"
+            except Exception:
+                pass
+
+    # Guard: never let test doubles write translation history to prod DB
+    if _is_test_pollution({"user_id": user_id, "provider": provider or "", "display_name": display_name, "username": username}):
+        return
 
     try:
         async with dbmod.session() as sess:
@@ -610,6 +686,38 @@ async def run_translation(
     because /whoami is exempt from it.
     """
     t0 = time.monotonic()
+
+    # -- Gate 2.5: Maintenance Mode (defense-in-depth — handlers already
+    #    gate this, but /tr inline and any future caller must also be blocked
+    #    without spending provider credits) ---------------------------------
+    try:
+        from .maintenance import get_config as _get_maint_cfg
+        _mcfg = await _get_maint_cfg()
+        if _mcfg.enabled:
+            _is_admin = False
+            if _mcfg.allow_admin_bypass:
+                try:
+                    _, _role = await services.user_store.is_allowed(user_id)
+                    _is_admin = (_role == "admin") or (user_id in config.ADMIN_USER_IDS)
+                except Exception:
+                    pass
+            if not _is_admin:
+                from ..bot import strings as _mstrings
+                await services.bot.send_message(
+                    chat_id,
+                    _mstrings.maintenance_text(_mcfg.message),
+                    parse_mode="HTML",
+                    reply_parameters=ReplyParameters(
+                        message_id=anchor_message_id, allow_sending_without_reply=True
+                    ),
+                )
+                await log_usage(
+                    services, user_id=user_id, char_len=len(raw_text),
+                    status="maintenance", policy_version=services.policy.version,
+                )
+                return
+    except Exception:
+        log.warning("maintenance_gate_pipeline_failed", exc_info=True)
 
     # -- Gate 5: length cap, counted on the RAW text, pre-mask -------------
     if not (1 <= len(raw_text) <= config.MAX_INPUT_CHARS):

@@ -345,6 +345,15 @@ async def healthz():
         within_grace or services.stats.last_success_within(600) or not in_working_hours
     )
 
+    # Maintenance flag — informational, never flips health status
+    _maintenance_enabled = False
+    try:
+        from .services.maintenance import get_config as _get_maint
+        _mcfg = await _get_maint()
+        _maintenance_enabled = bool(_mcfg.enabled)
+    except Exception:
+        pass
+
     checks = {
         "db": await dbmod.ping(),
         "cache": await services.cache.ping(),
@@ -356,6 +365,7 @@ async def healthz():
         # when this returns 503, which kills the admin login page even
         # though the bot (outbound polling) keeps working.
         "traffic": traffic_ok,
+        "maintenance": _maintenance_enabled,
     }
     # P1.3: healthz is the observer for DB/cache - raise/resolve alerts here
     # so a degraded infra is loud even if no translation is currently failing.
@@ -390,5 +400,5 @@ async def healthz():
     except Exception:  # noqa: BLE001
         log.warning("healthz_alert_failed", exc_info=True)
 
-    ok = all(v for k, v in checks.items() if k != "traffic")
+    ok = all(v for k, v in checks.items() if k not in ("traffic", "maintenance"))
     return JSONResponse(checks, status_code=200 if ok else 503)

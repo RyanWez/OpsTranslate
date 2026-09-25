@@ -109,6 +109,12 @@ export const useRealtimeStore = defineStore('realtime', () => {
         overviewStore.fetchOverview(true)
       })
 
+      eventSource.addEventListener('maintenance_changed', () => {
+        lastEventTime.value = new Date().toLocaleTimeString()
+        const overviewStore = useOverviewStore()
+        overviewStore.fetchOverview(true)
+      })
+
       eventSource.addEventListener('users_changed', () => {
         lastEventTime.value = new Date().toLocaleTimeString()
         const usersStore = useUsersStore()

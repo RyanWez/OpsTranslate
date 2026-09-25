@@ -12,6 +12,7 @@ import {
   ShieldCheckmarkOutline,
   TerminalOutline,
   SparklesOutline,
+  ConstructOutline,
 } from '@vicons/ionicons5'
 
 const route = useRoute()
@@ -63,6 +64,11 @@ const menuOptions = [
     label: 'Bot Commands',
     key: 'commands',
     icon: renderIcon(TerminalOutline),
+  },
+  {
+    label: 'Maintenance',
+    key: 'maintenance',
+    icon: renderIcon(ConstructOutline),
   },
   {
     label: 'Audit Logs',

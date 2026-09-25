@@ -186,6 +186,15 @@ async def get_overview(request: Request):
 
     telemetry = services.stats.get_telemetry()
 
+    # Maintenance state (non-fatal if it fails)
+    maintenance = None
+    try:
+        from ..services.maintenance import get_config as _get_maint
+        _mcfg = await _get_maint()
+        maintenance = _mcfg.to_dict()
+    except Exception:
+        pass
+
     return {
         "status": "ok",
         "mode": config.MODE,
@@ -201,7 +210,63 @@ async def get_overview(request: Request):
         "today_spend_usd": round(today_spend, 4),
         "server_time": datetime.datetime.now(YANGON).strftime("%Y-%m-%d %H:%M:%S"),
         "telemetry": telemetry,
+        "maintenance": maintenance,
     }
+
+
+# ---- Maintenance Mode -----------------------------------------------------
+
+class MaintenancePayload(BaseModel):
+    enabled: bool = False
+    message: str = Field(default="", max_length=4000)
+    title: str = Field(default="", max_length=120)
+    allow_admin_bypass: bool = True
+
+
+@router.get("/maintenance", dependencies=[Depends(require_admin)])
+async def get_maintenance():
+    """Return current maintenance mode configuration."""
+    from ..services.maintenance import get_config, DEFAULT_MESSAGE, DEFAULT_TITLE
+
+    cfg = await get_config(force_refresh=True)
+    return {
+        "enabled": cfg.enabled,
+        "message": cfg.message or DEFAULT_MESSAGE,
+        "title": cfg.title or DEFAULT_TITLE,
+        "allow_admin_bypass": cfg.allow_admin_bypass,
+        "updated_at": cfg.updated_at,
+        "updated_by": cfg.updated_by,
+        "defaults": {"message": DEFAULT_MESSAGE, "title": DEFAULT_TITLE},
+    }
+
+
+@router.put("/maintenance", dependencies=[Depends(require_admin)])
+async def update_maintenance(payload: MaintenancePayload, request: Request):
+    """Create or update maintenance mode. Fully admin-controlled."""
+    from ..services.maintenance import set_config, get_config
+
+    # Identify actor if possible
+    actor_id: int | None = None
+    try:
+        from ..admin.auth import is_authenticated as _is_auth
+        # Best-effort: try to read user from a future actor header; fallback None
+        pass
+    except Exception:
+        pass
+
+    # Validate: message must not be empty when enabling
+    if payload.enabled and not payload.message.strip():
+        # Allow empty -> service will fall back to DEFAULT_MESSAGE
+        pass
+
+    cfg = await set_config(
+        enabled=payload.enabled,
+        message=payload.message,
+        title=payload.title,
+        allow_admin_bypass=payload.allow_admin_bypass,
+        updated_by=actor_id,
+    )
+    return {"ok": True, "maintenance": cfg.to_dict()}
 
 
 # ---- Policy & Term Glossary -----------------------------------------------
@@ -1078,6 +1143,32 @@ async def get_translation_history(
     from zoneinfo import ZoneInfo
     mmt = ZoneInfo("Asia/Yangon")
 
+    # Preload user identity map for fallback when history row has NULL names
+    # (e.g. pytest pollution with UID 11 that has no allowed_users entry,
+    # or legacy rows before username capturing existed).
+    _user_identity: dict[int, dict] = {}
+    if dbmod.is_configured():
+        try:
+            from sqlalchemy import select as _sel2
+            async with dbmod.session() as _sess2:
+                _rows2 = (await _sess2.execute(_sel2(AllowedUser.user_id, AllowedUser.display_name, AllowedUser.username))).all()
+                for _uid, _dn, _un in _rows2:
+                    _user_identity[_uid] = {"display_name": _dn, "username": _un}
+        except Exception:
+            pass
+        # Merge in-memory discovered users (for non-DB persisted identities)
+        try:
+            from fastapi import Request as _Req2  # noqa: F401
+            # services is not yet in scope here, fallback via request.app state
+            _svc_tmp = request.app.state.services if hasattr(request.app.state, "services") else None
+            if _svc_tmp and hasattr(_svc_tmp.user_store, "get_discovered_users"):
+                for _d in _svc_tmp.user_store.get_discovered_users():
+                    _uid = _d.get("user_id")
+                    if _uid and _uid not in _user_identity:
+                        _user_identity[_uid] = {"display_name": _d.get("display_name"), "username": _d.get("username")}
+        except Exception:
+            pass
+
     try:
         async with dbmod.session() as sess:
             query = select(TranslationHistory)
@@ -1120,13 +1211,14 @@ async def get_translation_history(
 
             items = []
             for r in rows:
+                _fallback = _user_identity.get(r.user_id, {})
                 items.append({
                     "id": r.id,
                     "timestamp": int(r.ts.timestamp() * 1000) if r.ts else None,
                     "created_at": r.ts.astimezone(mmt).strftime("%Y-%m-%d %H:%M:%S") if r.ts else "",
                     "user_id": r.user_id,
-                    "username": r.username,
-                    "display_name": r.display_name,
+                    "username": r.username or _fallback.get("username"),
+                    "display_name": r.display_name or _fallback.get("display_name"),
                     "src_lang": r.src_lang,
                     "dst_lang": r.dst_lang,
                     "input_text": r.input_text,
