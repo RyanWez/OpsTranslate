@@ -51,6 +51,9 @@ def _compute_sha256(filepath: Path) -> str:
 async def _dump_tables_native() -> dict[str, list[dict]]:
     """Dump all tables into a serializable dict when pg_dump is not present."""
     from sqlalchemy import select
+    from decimal import Decimal
+    from datetime import date
+    import uuid
 
     if not dbmod.is_configured():
         raise RuntimeError("DATABASE_URL is not configured.")
@@ -65,8 +68,12 @@ async def _dump_tables_native() -> dict[str, list[dict]]:
             for r in res.mappings():
                 row_dict = {}
                 for k, v in r.items():
-                    if isinstance(v, (datetime,)):
+                    if isinstance(v, (datetime, date)):
                         row_dict[k] = v.isoformat()
+                    elif isinstance(v, Decimal):
+                        row_dict[k] = float(v)
+                    elif isinstance(v, uuid.UUID):
+                        row_dict[k] = str(v)
                     elif isinstance(v, bytes):
                         # Hex-encode binary/BYTEA fields
                         row_dict[k] = v.hex()
@@ -107,7 +114,7 @@ async def create_backup(dest_dir: Path | None = None) -> Path:
         else:
             data = {"_notice": [{"reason": "DATABASE_URL not set; placeholder backup"}]}
         
-        json_bytes = json.dumps(data, indent=2).encode("utf-8")
+        json_bytes = json.dumps(data, indent=2, default=str).encode("utf-8")
         with gzip.open(backup_file, "wb") as f:
             f.write(json_bytes)
 

@@ -218,14 +218,16 @@ async def test_broadcast_maintenance_notification_off_custom(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_service_resumed_uses_animated_emoji(monkeypatch):
-    """When a custom animated emoji is configured for service_resumed, it upgrades 🟢."""
+    """When a custom animated emoji is configured for service_resumed, it upgrades standard fallback."""
     from app.bot import emojis, strings
-    emojis._slots_cache["service_resumed"].custom_emoji_id = "9876543210"
+    slot = emojis._slots_cache["service_resumed"]
+    prev_id = slot.custom_emoji_id
+    slot.custom_emoji_id = "9876543210"
     try:
         text = strings.maintenance_broadcast_off_text()
-        assert '<tg-emoji emoji-id="9876543210">🟢</tg-emoji>' in text
+        assert f'<tg-emoji emoji-id="9876543210">{slot.fallback}</tg-emoji>' in text
     finally:
-        emojis._slots_cache["service_resumed"].custom_emoji_id = ""
+        slot.custom_emoji_id = prev_id
 
 
 @pytest.mark.asyncio

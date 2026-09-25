@@ -63,3 +63,11 @@ def isolate_translation_writes(monkeypatch):
     # the door open to add a stricter mock later without breaking history
     # test suites.
     yield
+
+
+@pytest.fixture(autouse=True)
+def reset_db_engine():
+    yield
+    # Reset any cached SQLAlchemy engine so subsequent test modules / event loops don't share stale loop connections
+    dbmod._engine = None
+    dbmod._session_factory = None

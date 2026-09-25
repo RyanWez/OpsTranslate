@@ -41,24 +41,27 @@ async def test_user_store_sync_in_memory():
     assert u2["active"] is True
 
 
-@pytest.mark.asyncio
-async def test_api_user_routes_with_discovered(monkeypatch):
+def test_api_user_routes_with_discovered(monkeypatch):
     from fastapi.testclient import TestClient
     from app.main import app
     from app.admin import auth
 
-    # Mock admin authentication
+    # Mock admin authentication and isolate from real DB
     monkeypatch.setattr(auth, "is_authenticated", lambda req: True)
+    monkeypatch.setattr("app.store.db.is_configured", lambda: False)
 
     with TestClient(app) as client:
-        # Pre-populate discovered user in services.user_store
         services = app.state.services
-        await services.user_store.sync_user_profile(
-            user_id=999888,
-            full_name="Ko Aung",
-            username="koaung",
-            auto_allow=True,
-        )
+        services.user_store._discovered_users[999888] = {
+            "user_id": 999888,
+            "display_name": "Ko Aung",
+            "username": "koaung",
+            "active": True,
+            "role": "staff",
+            "daily_soft_cap": 200,
+            "last_active_at": "2026-09-25T12:00:00Z",
+            "created_at": "2026-09-25T12:00:00Z",
+        }
 
         # GET /api/admin/users
         res = client.get("/api/admin/users")
