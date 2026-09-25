@@ -148,6 +148,10 @@ async def lifespan(app: FastAPI):
     if config.MODE == "polling":
         async def _poll():
             log.info("starting polling mode with auto-reconnect")
+            try:
+                await bot.delete_webhook(drop_pending_updates=True)
+            except Exception as e:
+                log.debug("delete_webhook_ignored: %s", e)
             backoff = 2
             first_run = True
             while not shutdown_event.is_set():
@@ -192,7 +196,9 @@ async def lifespan(app: FastAPI):
                 allowed_updates=ALLOWED_UPDATES,
                 drop_pending_updates=True,
             )
-            log.info("webhook registered")
+            log.info("webhook registered: %s", url)
+        else:
+            log.error("webhook_registration_failed: PUBLIC_URL or WEBHOOK_PATH_SECRET is not configured")
 
     # Watchdog for error rate / p95 / digest (P1.3)
     watchdog_task = None
