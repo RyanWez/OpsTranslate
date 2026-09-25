@@ -6,6 +6,7 @@ primary_region = "sin"
 [build]
 
 [deploy]
+  strategy = "immediate"
   release_command = "sh -c 'if [ -n \"$DATABASE_URL\" ]; then alembic upgrade head && python -m app.store.seed; fi'"
 
 [env]
