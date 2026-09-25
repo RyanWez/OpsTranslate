@@ -400,6 +400,7 @@ async def _edit_result(
     src: str,
     dst: str,
     result: str,
+    is_admin_bypass: bool = False,
 ) -> None:
     """Publish only the complete validated translation (final-only delivery).
 
@@ -411,6 +412,8 @@ async def _edit_result(
     """
     import html
     header = strings.translation_header(src.upper(), dst.upper())
+    if is_admin_bypass:
+        header = f"🔧 <i>[Maintenance Mode — Admin Bypass]</i>\n{header}"
     escaped_result = html.escape(result)
     await _edit_text(
         services,
@@ -690,17 +693,21 @@ async def run_translation(
     # -- Gate 2.5: Maintenance Mode (defense-in-depth — handlers already
     #    gate this, but /tr inline and any future caller must also be blocked
     #    without spending provider credits) ---------------------------------
+    is_admin_bypass = False
     try:
         from .maintenance import get_config as _get_maint_cfg
         _mcfg = await _get_maint_cfg()
         if _mcfg.enabled:
             _is_admin = False
             if _mcfg.allow_admin_bypass:
-                try:
-                    _, _role = await services.user_store.is_allowed(user_id)
-                    _is_admin = (_role == "admin") or (user_id in config.ADMIN_USER_IDS)
-                except Exception:
-                    pass
+                if user_id in config.ADMIN_USER_IDS:
+                    _is_admin = True
+                else:
+                    try:
+                        _, _role = await services.user_store.is_allowed(user_id)
+                        _is_admin = (_role == "admin")
+                    except Exception:
+                        pass
             if not _is_admin:
                 from ..bot import strings as _mstrings
                 await services.bot.send_message(
@@ -716,6 +723,8 @@ async def run_translation(
                     status="maintenance", policy_version=services.policy.version,
                 )
                 return
+            else:
+                is_admin_bypass = True
     except Exception:
         log.warning("maintenance_gate_pipeline_failed", exc_info=True)
 
@@ -763,7 +772,7 @@ async def run_translation(
         if cached is not None and (time.time() - cached.stored_at) < 30:
             # Already answered within 30s: resend, NO rate slot consumed.
             placeholder_id = await _send_placeholder(services, chat_id, anchor_message_id)
-            await _edit_result(services, chat_id, placeholder_id, src, dst, cached.text)
+            await _edit_result(services, chat_id, placeholder_id, src, dst, cached.text, is_admin_bypass=is_admin_bypass)
             services.stats.record_ok(time.monotonic() - t0, cache_hit=True)
             return
 
@@ -816,7 +825,7 @@ async def run_translation(
         # -- Gate 9: cache ---------------------------------------------------
         if cached is not None:
             placeholder_id = await _send_placeholder(services, chat_id, anchor_message_id)
-            await _edit_result(services, chat_id, placeholder_id, src, dst, cached.text)
+            await _edit_result(services, chat_id, placeholder_id, src, dst, cached.text, is_admin_bypass=is_admin_bypass)
             services.stats.record_ok(time.monotonic() - t0, cache_hit=True)
             await log_usage(
                 services, user_id=user_id, src_lang=src, dst_lang=dst,
@@ -903,7 +912,7 @@ async def run_translation(
                 )
                 return
             sanitized = sanitize_leaks(raw_text, dst)
-            await _edit_result(services, chat_id, placeholder_id, src, dst, sanitized)
+            await _edit_result(services, chat_id, placeholder_id, src, dst, sanitized, is_admin_bypass=is_admin_bypass)
             return
         except AllProvidersDown as exc:
             services.stats.record_failure()
@@ -956,7 +965,7 @@ async def run_translation(
             _today_key("spend"), config.PROVIDER_COST_PER_MSG_USD, 86400
         )
         await services.cache.put(ckey, result)
-        await _edit_result(services, chat_id, placeholder_id, src, dst, result)
+        await _edit_result(services, chat_id, placeholder_id, src, dst, result, is_admin_bypass=is_admin_bypass)
         services.stats.record_ok(time.monotonic() - t0, cache_hit=False)
         await log_usage(
             services, user_id=user_id, src_lang=src, dst_lang=dst,

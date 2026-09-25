@@ -25,9 +25,15 @@ def _open_gate(monkeypatch):
     monkeypatch.setattr(config, "TEST_ALLOW_ALL", True)
     handlers._bot_id_cache.clear()
     ratelimit.reset()          # the sliding window is process-global
+    from app.services import maintenance
+    from app.services.maintenance import MaintenanceConfig
+    import time
+    maintenance._cached = MaintenanceConfig(enabled=False)
+    maintenance._cached_at = time.monotonic() + 999999
     yield
     handlers._bot_id_cache.clear()
     ratelimit.reset()
+    maintenance.invalidate_cache()
 
 
 def services_with(bot=None, router=None, **kw):

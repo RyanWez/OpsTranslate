@@ -20,7 +20,7 @@ const saving = ref(false)
 const enabled = ref(false)
 const title = ref('')
 const msgText = ref('')
-const allowAdminBypass = ref(true)
+const allowAdminBypass = ref(false)
 
 // Defaults from server
 const defaultMessage = ref('')
@@ -46,7 +46,7 @@ async function fetchMaintenance() {
     enabled.value = !!d.enabled
     msgText.value = d.message || ''
     title.value = d.title || ''
-    allowAdminBypass.value = d.allow_admin_bypass !== false
+    allowAdminBypass.value = !!d.allow_admin_bypass
     updatedAt.value = d.updated_at || null
     if (d.defaults) {
       defaultMessage.value = d.defaults.message || ''

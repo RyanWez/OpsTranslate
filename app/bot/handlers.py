@@ -156,21 +156,21 @@ async def _check_maintenance(
         if not cfg.enabled:
             return False
         # Admin bypass
-        if cfg.allow_admin_bypass:
+        if cfg.allow_admin_bypass and message.from_user:
+            uid = message.from_user.id
+            if uid in configmod.ADMIN_USER_IDS:
+                return False
             try:
-                _, role = await services.user_store.is_allowed(message.from_user.id)
+                _, role = await services.user_store.is_allowed(uid)
                 if role == "admin":
                     return False
             except Exception:
                 pass
-            # Also check env-seeded admins
-            if message.from_user.id in configmod.ADMIN_USER_IDS:
-                return False
         try:
             await message.answer(strings.maintenance_text(cfg.message), parse_mode="HTML")
         except Exception:
             pass
-        log.info("maintenance_blocked user=%s", message.from_user.id)
+        log.info("maintenance_blocked user=%s", message.from_user.id if message.from_user else None)
         return True
     except Exception:
         log.warning("maintenance_check_failed", exc_info=True)
@@ -269,9 +269,23 @@ async def cmd_status(message: Message, services: Services) -> None:
     shield = strings.get_emoji("help_privacy")
     ok_icon = strings.get_emoji("status_ok")
     fail_icon = strings.get_emoji("status_fail")
+
+    from ..services.maintenance import get_config as _get_maint
+    maint_line = ""
+    try:
+        mcfg = await _get_maint()
+        if mcfg.enabled:
+            bypass_info = " (Admin Bypass: ON)" if mcfg.allow_admin_bypass else " (All Users Blocked)"
+            maint_line = f"🔧 Maintenance: <b>ACTIVE</b>{bypass_info}\n"
+        else:
+            maint_line = "🟢 Maintenance: Inactive\n"
+    except Exception:
+        pass
+
     await message.answer(
         f"{chart} <b>Status</b>\n"
         f"{shield} Policy: v{services.policy.version}\n"
+        f"{maint_line}"
         f"Providers:\n{prov_lines}\n"
         f"Today: {ok_icon} {stats.translations_ok} ok / {fail_icon} {stats.translations_failed} failed\n"
         f"Cache hit rate: {stats.cache_hit_rate:.1%}\n"
@@ -384,7 +398,9 @@ async def cmd_tr(message: Message, services: Services, bot: Bot) -> None:
         return
 
     # Bare /tr: auto toggle mode needs no language choice.
-    await message.answer(strings.auto_mode_text(), parse_mode="HTML")
+    cfg = await get_maintenance_config()
+    maint_note = "🔧 <i>[Maintenance Mode Active — Admin Bypass]</i>\n\n" if (cfg.enabled and cfg.allow_admin_bypass) else ""
+    await message.answer(f"{maint_note}{strings.auto_mode_text()}", parse_mode="HTML")
 
 
 # ---------------------------------------------------------------------------

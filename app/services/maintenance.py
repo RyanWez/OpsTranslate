@@ -45,7 +45,7 @@ DEFAULT_TITLE: str = "Under Maintenance"
 class MaintenanceConfig:
     enabled: bool = False
     message: str = DEFAULT_MESSAGE
-    allow_admin_bypass: bool = True
+    allow_admin_bypass: bool = False
     title: str = DEFAULT_TITLE
     updated_at: str | None = None
     updated_by: int | None = None
@@ -60,7 +60,7 @@ class MaintenanceConfig:
         return cls(
             enabled=bool(data.get("enabled", False)),
             message=str(data.get("message") or DEFAULT_MESSAGE).strip() or DEFAULT_MESSAGE,
-            allow_admin_bypass=bool(data.get("allow_admin_bypass", True)),
+            allow_admin_bypass=bool(data.get("allow_admin_bypass", False)),
             title=str(data.get("title") or DEFAULT_TITLE).strip() or DEFAULT_TITLE,
             updated_at=data.get("updated_at"),
             updated_by=data.get("updated_by"),
@@ -170,6 +170,9 @@ async def should_bypass(user_id: int, user_store=None) -> bool:
         return False
     if not cfg.allow_admin_bypass:
         return False
+    from .. import config as configmod
+    if user_id in configmod.ADMIN_USER_IDS:
+        return True
     if user_store is None:
         return False
     try:

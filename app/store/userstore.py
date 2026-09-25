@@ -64,9 +64,6 @@ class UserStore:
 
     async def is_allowed(self, user_id: int) -> tuple[bool, str]:
         """Return (allowed, role). Role is 'admin' | 'staff'."""
-        if config.TEST_ALLOW_ALL:
-            return True, "admin"  # test mode: everyone in, /status available
-
         # Memo only helps when DB is the source; without DB the lookup is
         # already in-memory via _seed_* sets.
         if dbmod.is_configured():
@@ -109,6 +106,9 @@ class UserStore:
         if user_id in self._seed_admin:
             result = (True, "admin")
         elif user_id in self._seed_staff:
+            result = (True, "staff")
+        elif config.TEST_ALLOW_ALL:
+            # Test mode fallback: allow unregistered users in as staff (never grant blanket admin)
             result = (True, "staff")
         else:
             result = (False, "staff")

@@ -220,7 +220,7 @@ class MaintenancePayload(BaseModel):
     enabled: bool = False
     message: str = Field(default="", max_length=4000)
     title: str = Field(default="", max_length=120)
-    allow_admin_bypass: bool = True
+    allow_admin_bypass: bool = False
 
 
 @router.get("/maintenance", dependencies=[Depends(require_admin)])
