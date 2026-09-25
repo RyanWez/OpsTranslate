@@ -141,3 +141,19 @@ async def test_status_displays_maintenance_inactive(monkeypatch):
     assert len(msg.answers) == 1
     body = msg.answers[0]
     assert "Maintenance: Inactive" in body
+
+
+@pytest.mark.asyncio
+async def test_maintenance_uses_animated_emoji_when_configured(monkeypatch):
+    """When a custom animated emoji is configured for maintenance, it upgrades 🔧 in the text."""
+    from app.bot import emojis, strings
+    emojis._slots_cache["maintenance"].custom_emoji_id = "54321987654321"
+    try:
+        text = strings.maintenance_text()
+        assert '<tg-emoji emoji-id="54321987654321">🔧</tg-emoji>' in text
+
+        custom_text = "🔧 <b>Custom maintenance title</b>\nPlease wait."
+        rendered = strings.maintenance_text(custom_text)
+        assert '<tg-emoji emoji-id="54321987654321">🔧</tg-emoji>' in rendered
+    finally:
+        emojis._slots_cache["maintenance"].custom_emoji_id = ""

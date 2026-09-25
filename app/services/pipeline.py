@@ -413,7 +413,8 @@ async def _edit_result(
     import html
     header = strings.translation_header(src.upper(), dst.upper())
     if is_admin_bypass:
-        header = f"🔧 <i>[Maintenance Mode — Admin Bypass]</i>\n{header}"
+        maint_icon = strings.get_emoji("maintenance")
+        header = f"{maint_icon} <i>[Maintenance Mode — Admin Bypass]</i>\n{header}"
     escaped_result = html.escape(result)
     await _edit_text(
         services,

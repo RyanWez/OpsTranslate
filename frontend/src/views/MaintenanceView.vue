@@ -74,7 +74,7 @@ async function save() {
       enabled.value = !!d.enabled
       updatedAt.value = d.updated_at || null
     }
-    message.success(enabled.value ? '🔧 Maintenance mode ENABLED — bot will show the custom notice.' : '✅ Maintenance mode disabled — bot is live again.')
+    message.success(enabled.value ? 'Maintenance mode ENABLED — bot will show the custom notice.' : 'Maintenance mode disabled — bot is live again.')
   } catch (err: any) {
     message.error('Save failed: ' + (err.response?.data?.detail || err.message))
   } finally {
@@ -244,7 +244,7 @@ onMounted(() => {
         />
         <div v-if="messageError" class="text-[11px] text-red-400 mt-1">{{ messageError }}</div>
         <div class="text-[11px] text-gray-500 mt-2 leading-relaxed">
-          Tip: You can include Burmese + English. Telegram HTML is supported — <code>&lt;b&gt;bold&lt;/b&gt;</code>, <code>&lt;i&gt;italic&lt;/i&gt;</code>, <code>&lt;code&gt;</code>. Leave empty to use the built-in default.
+          Tip: You can include Burmese + English. Telegram HTML is supported — <code>&lt;b&gt;bold&lt;/b&gt;</code>, <code>&lt;i&gt;italic&lt;/i&gt;</code>, <code>&lt;code&gt;</code>, and Telegram Premium animated emojis <code>&lt;tg-emoji emoji-id="..."&gt;🔧&lt;/tg-emoji&gt;</code> (or configure under <router-link to="/emojis" class="text-cyan-400 hover:underline">Animated Emojis</router-link>). Leave empty to use the built-in default.
         </div>
 
         <!-- Preview -->

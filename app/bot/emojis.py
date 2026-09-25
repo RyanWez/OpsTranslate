@@ -140,6 +140,13 @@ DEFAULT_SLOTS: dict[str, EmojiSlot] = {
         fallback="🚫",
         description="Access denied indicator for unauthorized staff",
     ),
+    "maintenance": EmojiSlot(
+        key="maintenance",
+        label="Maintenance / Update Notice",
+        category="Alerts",
+        fallback="🔧",
+        description="Wrench / Update icon in maintenance notices and admin bypass tags",
+    ),
 }
 
 # In-memory fast cache

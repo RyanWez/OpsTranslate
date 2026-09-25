@@ -1408,7 +1408,8 @@ async def test_bot_emojis_endpoint(request: Request):
         f"<b>3. Alerts & Warnings:</b>\n"
         f"• Warning: {get_emoji('warning')}\n"
         f"• Rate Limit: {get_emoji('rate_limit')}\n"
-        f"• Unauthorized: {get_emoji('unauthorized')}"
+        f"• Unauthorized: {get_emoji('unauthorized')}\n"
+        f"• Maintenance: {get_emoji('maintenance')}"
     )
 
     try:

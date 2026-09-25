@@ -274,9 +274,10 @@ async def cmd_status(message: Message, services: Services) -> None:
     maint_line = ""
     try:
         mcfg = await _get_maint()
+        maint_icon = strings.get_emoji("maintenance")
         if mcfg.enabled:
             bypass_info = " (Admin Bypass: ON)" if mcfg.allow_admin_bypass else " (All Users Blocked)"
-            maint_line = f"🔧 Maintenance: <b>ACTIVE</b>{bypass_info}\n"
+            maint_line = f"{maint_icon} Maintenance: <b>ACTIVE</b>{bypass_info}\n"
         else:
             maint_line = "🟢 Maintenance: Inactive\n"
     except Exception:
@@ -399,7 +400,8 @@ async def cmd_tr(message: Message, services: Services, bot: Bot) -> None:
 
     # Bare /tr: auto toggle mode needs no language choice.
     cfg = await get_maintenance_config()
-    maint_note = "🔧 <i>[Maintenance Mode Active — Admin Bypass]</i>\n\n" if (cfg.enabled and cfg.allow_admin_bypass) else ""
+    maint_icon = strings.get_emoji("maintenance")
+    maint_note = f"{maint_icon} <i>[Maintenance Mode Active — Admin Bypass]</i>\n\n" if (cfg.enabled and cfg.allow_admin_bypass) else ""
     await message.answer(f"{maint_note}{strings.auto_mode_text()}", parse_mode="HTML")
 
 
