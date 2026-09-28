@@ -15,7 +15,14 @@ def client():
 
 @pytest.fixture
 def auth_headers(monkeypatch):
-    monkeypatch.setattr(config, "get", lambda k, default="": "secret-pass" if k == "ADMIN_PASSWORD" else default)
+    def _cfg(k, default=""):
+        if k == "ADMIN_PASSWORD":
+            return "secret-pass"
+        if k == "ENCRYPTION_KEY":
+            return "unit-test-encryption-key"
+        return default
+
+    monkeypatch.setattr(config, "get", _cfg)
     token = get_expected_token()
     return {"Authorization": f"Bearer {token}"}
 

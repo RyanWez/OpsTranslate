@@ -19,6 +19,7 @@ idle bot during working hours still routes admin traffic.
 from __future__ import annotations
 
 import asyncio
+import hmac
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -98,10 +99,20 @@ async def lifespan(app: FastAPI):
     if missing:
         log.warning("missing configuration for live run: %s", ", ".join(missing))
 
-    if config.get("ADMIN_PASSWORD", "admin123") == "admin123":
-        log.warning(
-            "SECURITY WARNING: ADMIN_PASSWORD is set to default 'admin123'. "
-            "Please set a strong custom ADMIN_PASSWORD in your environment variables for production!"
+    from .admin.auth import is_admin_password_configured
+    from .store.crypto import is_encryption_configured
+
+    if not is_admin_password_configured():
+        log.error(
+            "SECURITY: ADMIN_PASSWORD is unset or the default 'admin123'. The "
+            "admin panel is fail-closed - no login will succeed until a strong "
+            "ADMIN_PASSWORD is configured."
+        )
+    if not is_encryption_configured():
+        log.error(
+            "SECURITY: ENCRYPTION_KEY is not set. Provider credentials cannot be "
+            "encrypted or decrypted - saving a provider API key will be rejected "
+            "until a strong ENCRYPTION_KEY is configured (see .env.example)."
         )
 
     bot = Bot(token=config.BOT_TOKEN or "0:placeholder", session=config.telegram_session())
@@ -312,10 +323,12 @@ async def webhook(
     x_telegram_bot_api_secret_token: str | None = Header(default=None),
 ):
     """Gate 1: path secret + secret-token header must both match."""
-    if (
-        not config.WEBHOOK_PATH_SECRET
-        or path_secret != config.WEBHOOK_PATH_SECRET
-        or (config.WEBHOOK_SECRET and x_telegram_bot_api_secret_token != config.WEBHOOK_SECRET)
+    expected_path = config.WEBHOOK_PATH_SECRET
+    if not expected_path or not hmac.compare_digest(path_secret, expected_path):
+        raise HTTPException(status_code=403, detail="forbidden")
+    expected_header = config.WEBHOOK_SECRET
+    if expected_header and not hmac.compare_digest(
+        x_telegram_bot_api_secret_token or "", expected_header
     ):
         raise HTTPException(status_code=403, detail="forbidden")
     data = await request.json()

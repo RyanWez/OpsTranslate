@@ -7,6 +7,12 @@ No PROVIDER_* / PROVIDERS_JSON env vars exist by design.
 Required for a live run:
     BOT_TOKEN, DATABASE_URL (providers come from DB)
 
+Security (read dynamically in admin/auth.py and store/crypto.py):
+    ADMIN_PASSWORD (required - no default; unset/'admin123' = admin login disabled),
+    ENCRYPTION_KEY (required to store provider API keys; no derivable default),
+    TRUSTED_CLIENT_IP_HEADER (header carrying the real client IP behind a
+        trusted proxy, e.g. Fly-Client-IP; empty = trust only the socket peer).
+
 Optional:
     ALERT_BOT_TOKEN, ADMIN_CHAT_ID, WEBHOOK_SECRET, WEBHOOK_PATH_SECRET,
     REDIS_URL,

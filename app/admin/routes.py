@@ -25,6 +25,7 @@ from ..policy.policy import (
 from ..services.pipeline import Services, resolve_toggle_dst
 from ..services.provider import Provider as ServiceProvider
 from ..store import db as dbmod
+from ..store.crypto import is_encryption_configured
 from ..store.models import AllowedUser, Provider as DBProvider, UsageLog, TranslationHistory
 from ..store.providers import (
     get_active_service_providers,
@@ -492,6 +493,12 @@ async def create_provider(payload: ProviderPayload, request: Request):
             status_code=500,
             detail="DATABASE_URL is not configured - providers live in DB (managed via /admin).",
         )
+    if payload.api_key and not is_encryption_configured():
+        raise HTTPException(
+            status_code=400,
+            detail="ENCRYPTION_KEY is not configured - cannot store a provider API key "
+            "securely. Set a strong ENCRYPTION_KEY in the environment first.",
+        )
     try:
         from sqlalchemy import select
 
@@ -534,6 +541,12 @@ async def update_provider(provider_id: str, payload: ProviderPayload, request: R
         raise HTTPException(
             status_code=500,
             detail="DATABASE_URL is not configured - providers live in DB (managed via /admin).",
+        )
+    if payload.api_key and not is_encryption_configured():
+        raise HTTPException(
+            status_code=400,
+            detail="ENCRYPTION_KEY is not configured - cannot store a provider API key "
+            "securely. Set a strong ENCRYPTION_KEY in the environment first.",
         )
     try:
         from sqlalchemy import select

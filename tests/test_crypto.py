@@ -1,7 +1,18 @@
 import pytest
 
+from app import config
 from app.store.crypto import decrypt_secret, encrypt_secret
 from app.store.models import Provider
+
+
+@pytest.fixture(autouse=True)
+def _configured_encryption(monkeypatch):
+    """Encryption is fail-closed; every crypto test runs with a key configured."""
+    monkeypatch.setattr(
+        config,
+        "get",
+        lambda k, default="": "unit-test-encryption-key" if k == "ENCRYPTION_KEY" else default,
+    )
 
 
 def test_encrypt_decrypt_roundtrip():

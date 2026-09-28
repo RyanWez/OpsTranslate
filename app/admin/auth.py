@@ -14,14 +14,33 @@ from .. import config
 _SALT = "opstranslate-admin-salt-v1"
 SESSION_DURATION_S = 86400 * 7  # 7 days
 
+# The bot ships with no usable admin password. This literal is rejected so a
+# forgotten ADMIN_PASSWORD can never leave the panel open on the old default.
+DEFAULT_ADMIN_PASSWORD = "admin123"
+
 # IP -> deque of failure timestamps (sliding 5-minute window)
 _login_failures: dict[str, deque[float]] = defaultdict(deque)
 MAX_LOGIN_ATTEMPTS = 5
 LOCKOUT_WINDOW_S = 300.0
 
 
+def _admin_password() -> str:
+    return config.get("ADMIN_PASSWORD", "")
+
+
+def is_admin_password_configured() -> bool:
+    """True only when a real, non-default admin password is set.
+
+    Fail-closed: with no password (or the legacy 'admin123' default) the admin
+    panel accepts no logins and validates no sessions - a predictable session
+    secret must never be signable.
+    """
+    pwd = _admin_password()
+    return bool(pwd) and pwd != DEFAULT_ADMIN_PASSWORD
+
+
 def _get_secret_key() -> bytes:
-    pwd = config.get("ADMIN_PASSWORD", "admin123")
+    pwd = _admin_password()
     return f"{pwd}:{_SALT}".encode()
 
 
@@ -39,12 +58,16 @@ def get_expected_token() -> str:
 
 
 def verify_password(password: str) -> bool:
-    expected = config.get("ADMIN_PASSWORD", "admin123")
+    if not is_admin_password_configured():
+        return False
+    expected = _admin_password()
     return hmac.compare_digest(password.strip(), expected.strip())
 
 
 def validate_token(token: str | None) -> bool:
     """Validate a session token: checks signature and expiration."""
+    if not is_admin_password_configured():
+        return False
     if not token or not isinstance(token, str):
         return False
     token = token.strip()
@@ -70,12 +93,20 @@ def validate_token(token: str | None) -> bool:
 
 
 def _get_client_ip(request: Request) -> str:
-    cf_ip = request.headers.get("cf-connecting-ip")
-    if cf_ip:
-        return cf_ip.strip()
-    xff = request.headers.get("x-forwarded-for")
-    if xff:
-        return xff.split(",")[0].strip()
+    """Resolve the client IP for the login lockout bucket.
+
+    Only a proxy header the platform itself sets and the client cannot forge
+    is trusted (e.g. Fly.io's "Fly-Client-IP"), named via TRUSTED_CLIENT_IP_HEADER.
+    Client-supplied X-Forwarded-For / cf-connecting-ip are NOT trusted blindly:
+    an attacker rotating that header would otherwise get a fresh bucket per
+    request and sail past the per-IP brute-force lockout. With no trusted header
+    configured, fall back to the socket peer address.
+    """
+    trusted = config.get("TRUSTED_CLIENT_IP_HEADER", "")
+    if trusted:
+        val = request.headers.get(trusted.lower())
+        if val:
+            return val.split(",")[0].strip()
     return request.client.host if request.client else "unknown"
 
 
