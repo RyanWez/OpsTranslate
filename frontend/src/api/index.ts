@@ -10,7 +10,6 @@ import type {
   PlaygroundResult,
   UsageLogItem,
   PolicyData,
-  TranslationHistoryItem,
   TranslationHistoryResponse,
 } from '../types'
 
@@ -79,7 +78,6 @@ export const api = {
     src_lang?: string
     dst_lang?: string
   }) => apiClient.get<TranslationHistoryResponse>('/history', { params }),
-  getHistoryDetail: (id: number) => apiClient.get<TranslationHistoryItem>(`/history/${id}`),
   pruneHistory: (days = 30) => apiClient.delete<{ ok: boolean; deleted_count: number }>('/history/prune', { params: { days } }),
 
   // Telegram Bot Commands

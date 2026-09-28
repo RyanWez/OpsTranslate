@@ -1290,45 +1290,6 @@ async def get_translation_history(
         raise HTTPException(status_code=500, detail=f"Database error fetching history: {exc}")
 
 
-@router.get("/history/{history_id}", dependencies=[Depends(require_admin)])
-async def get_history_detail(history_id: int):
-    """Retrieve full audit detail for a specific translation."""
-    if not dbmod.is_configured():
-        raise HTTPException(status_code=500, detail="Database not configured")
-
-    from zoneinfo import ZoneInfo
-    mmt = ZoneInfo("Asia/Yangon")
-
-    try:
-        async with dbmod.session() as sess:
-            item = await sess.get(TranslationHistory, history_id)
-            if not item:
-                raise HTTPException(status_code=404, detail="Translation history record not found")
-            return {
-                "id": item.id,
-                "timestamp": int(item.ts.timestamp() * 1000) if item.ts else None,
-                "created_at": item.ts.astimezone(mmt).strftime("%Y-%m-%d %H:%M:%S") if item.ts else "",
-                "user_id": item.user_id,
-                "username": item.username,
-                "display_name": item.display_name,
-                "src_lang": item.src_lang,
-                "dst_lang": item.dst_lang,
-                "input_text": item.input_text,
-                "masked_text": item.masked_text,
-                "output_text": item.output_text,
-                "provider": item.provider,
-                "latency_ms": item.latency_ms,
-                "char_len": item.char_len,
-                "policy_hits": item.policy_hits or [],
-                "status": item.status,
-                "error_code": item.error_code,
-            }
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
 @router.delete("/history/prune", dependencies=[Depends(require_admin)])
 async def prune_translation_history(days: int = Query(default=30, ge=1)):
     """Prune translation history records older than given days to conserve database storage."""

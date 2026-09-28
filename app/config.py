@@ -23,8 +23,9 @@ Optional:
     MODE (polling | webhook, default polling),
     PROVIDER_TIMEOUT_S (default 8), PROVIDER_MAX_CONCURRENCY (default 8),
     PROVIDER_MAX_OUTPUT_TOKENS (default 1024),
+    HANDLER_BUDGET_S (default 60 - per-update wall-clock budget),
     DAILY_SPEND_CAP_USD (default 5.0), PROVIDER_COST_PER_MSG_USD (default 0.0004),
-    HEALTHZ_PUBLIC_URL (used by the keep-warm workflow only).
+    HTTPS_PROXY / ALL_PROXY (egress proxy for Telegram API calls, if any).
 """
 from __future__ import annotations
 
@@ -96,6 +97,11 @@ PROVIDER_TIMEOUT_S = _get_float("PROVIDER_TIMEOUT_S", 8.0)
 PROVIDER_MAX_CONCURRENCY = _get_int("PROVIDER_MAX_CONCURRENCY", 8)
 # Keep enough output budget for a full translation of the 500-character input cap.
 PROVIDER_MAX_OUTPUT_TOKENS = _get_int("PROVIDER_MAX_OUTPUT_TOKENS", 1024)
+# Per-update wall-clock budget for the whole handler. Spec SHOULD 16 says 12s,
+# but the live provider's first reasoning-heavy call takes ~11s, so 12s would
+# turn most translations into ERROR_GENERIC; 60s is the kept deviation.
+# PROVIDER_TIMEOUT_S still fires first on each per-provider call.
+HANDLER_BUDGET_S = _get_float("HANDLER_BUDGET_S", 60.0)
 
 # --- Storage ----------------------------------------------------------------
 DATABASE_URL = get("DATABASE_URL")  # Neon pooled connection string

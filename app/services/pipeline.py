@@ -63,11 +63,12 @@ from .stats import Stats
 
 log = logging.getLogger("opstranslate.pipeline")
 
-# Spec SHOULD 16 says 12 s. Live provider's first reasoning-heavy request
-# takes ~11 s, so 12 s would turn most translations into ERROR_GENERIC.
-# 60 s is kept as documented deviation (see README Spec deviations) and is
-# the binding limit; PROVIDER_TIMEOUT_S (8 s) fires first per-provider call.
-HANDLER_BUDGET_S = 60.0
+# Per-update wall-clock budget. Spec SHOULD 16 says 12 s, but the live
+# provider's first reasoning-heavy request takes ~11 s, so 12 s would turn
+# most translations into ERROR_GENERIC; 60 s is the kept deviation (see
+# README) and is the binding limit. PROVIDER_TIMEOUT_S (8 s) fires first on
+# each per-provider call. Overridable via the HANDLER_BUDGET_S env var.
+HANDLER_BUDGET_S = config.HANDLER_BUDGET_S
 
 
 class PolicyRefusal(Exception):
