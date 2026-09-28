@@ -274,6 +274,60 @@ async def test_group_member_is_served(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Non-member /start onboarding notice (the one path that is NOT silent)
+# ---------------------------------------------------------------------------
+
+async def test_non_member_start_shows_access_notice(monkeypatch):
+    monkeypatch.setattr(config, "TEST_ALLOW_ALL", False)
+    monkeypatch.setattr(config, "GROUP_CHAT_ID", -100123456)
+    monkeypatch.setattr(config, "ALLOWED_USER_IDS", [])
+    monkeypatch.setattr(config, "ADMIN_USER_IDS", [])
+    bot = FakeBot(me_id=BOT_ID, member_status="left")   # a stranger
+    services = services_with(bot, user_store=StubUserStore(allowed=False))
+    msg = FakeMessage(message_id=60, text="/start", from_id=555)
+
+    await handlers.cmd_start(msg, services)
+
+    assert len(msg.answers) == 1
+    body = msg.answers[0]
+    assert "Access Required" in body               # English on top
+    assert "အသုံးပြုခွင့်" in body                    # Myanmar below
+    # The Access button links to the configured contact URL.
+    kb = msg.answer_kwargs[0].get("reply_markup")
+    assert kb is not None
+    button = kb.inline_keyboard[0][0]
+    assert button.text == "Access"
+    assert button.url == config.ACCESS_CONTACT_URL
+
+
+async def test_suspended_start_shows_suspended_message_without_button(monkeypatch):
+    monkeypatch.setattr(config, "TEST_ALLOW_ALL", False)
+    monkeypatch.setattr(config, "GROUP_CHAT_ID", -100123456)
+    bot = FakeBot(me_id=BOT_ID, member_status="member")
+    services = services_with(bot, user_store=StubUserStore(role="suspended"))
+    msg = FakeMessage(message_id=61, text="/start", from_id=556)
+
+    await handlers.cmd_start(msg, services)
+
+    assert len(msg.answers) == 1
+    assert "suspended" in msg.answers[0].lower()
+    assert msg.answer_kwargs[0].get("reply_markup") is None  # no Access button
+
+
+async def test_non_member_help_stays_silent(monkeypatch):
+    # Only /start reveals the bot; /help (and every other path) stays invisible.
+    monkeypatch.setattr(config, "TEST_ALLOW_ALL", False)
+    monkeypatch.setattr(config, "GROUP_CHAT_ID", -100123456)
+    monkeypatch.setattr(config, "ALLOWED_USER_IDS", [])
+    bot = FakeBot(me_id=BOT_ID, member_status="left")
+    services = services_with(bot, user_store=StubUserStore(allowed=False))
+    msg = FakeMessage(message_id=62, text="/help", from_id=557)
+
+    await handlers.cmd_help(msg, services)
+    assert msg.answers == [] and msg.replies == []
+
+
+# ---------------------------------------------------------------------------
 # Language-button callback (the v3.2 stored-target fallback)
 # ---------------------------------------------------------------------------
 

@@ -88,6 +88,8 @@ ALERT_BOT_TOKEN = get("ALERT_BOT_TOKEN")
 ADMIN_CHAT_ID = get("ADMIN_CHAT_ID")
 WEBHOOK_SECRET = get("WEBHOOK_SECRET")            # X-Telegram-Bot-Api-Secret-Token header
 WEBHOOK_PATH_SECRET = get("WEBHOOK_PATH_SECRET")  # path segment of the webhook URL
+# Link shown on the "Access" button when a non-member presses /start.
+ACCESS_CONTACT_URL = get("ACCESS_CONTACT_URL", "https://t.me/ImYourSuperman")
 
 # --- AI provider tuning (OpenAI-compatible chat completions) -----------------
 # NOTE: provider credentials (base_url / api_key / model / priority) live

@@ -126,6 +126,25 @@ def not_authorized_text(user_id: int) -> str:
     return f"{lock} This bot is restricted to authorised staff.\nYour ID: {user_id}"
 
 
+def no_access_text() -> str:
+    """Bilingual notice shown when a non-member presses /start.
+
+    Exception to Locked Rule 1 (English-only UI): this onboarding prompt is
+    intentionally bilingual (English on top, Myanmar below) so an outsider who
+    does not read English still understands how to request access. The warning
+    icon uses the ``access_denied`` slot, so an animated custom emoji shows for
+    accounts that support it and ``⚠️`` is the fallback.
+    """
+    warn = get_emoji("access_denied")
+    return (
+        f"{warn} <b>Access Required</b>\n"
+        "You don't have permission to use this bot yet.\n"
+        "To get access, tap the Access button below.\n\n"
+        "သင့်တွင် ဤ Bot ကို အသုံးပြုခွင့် မရှိသေးပါ။\n"
+        "အသုံးပြုခွင့် ရယူရန် အောက်ရှိ Access ခလုတ်ကို နှိပ်ပါ။"
+    )
+
+
 def rate_limit_text(n: int) -> str:
     timer = get_emoji("rate_limit")
     count = getattr(config, "RATE_LIMIT_COUNT", 2)

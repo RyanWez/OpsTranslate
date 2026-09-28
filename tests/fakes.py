@@ -216,10 +216,12 @@ class FakeMessage:
         self.entities = None
         self.caption_entities = None
         self.answers: list[str] = []
+        self.answer_kwargs: list[dict] = []
         self.replies: list[str] = []
 
     async def answer(self, text, **kw):
         self.answers.append(text)
+        self.answer_kwargs.append(kw)
         return SimpleNamespace(message_id=9000 + len(self.answers))
 
     async def reply(self, text, **kw):

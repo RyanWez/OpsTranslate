@@ -140,6 +140,13 @@ DEFAULT_SLOTS: dict[str, EmojiSlot] = {
         fallback="🚫",
         description="Access denied indicator for unauthorized staff",
     ),
+    "access_denied": EmojiSlot(
+        key="access_denied",
+        label="Access Required (non-member /start)",
+        category="Alerts",
+        fallback="⚠️",
+        description="Shown at the top of the no-access notice when a non-member presses /start",
+    ),
     "maintenance": EmojiSlot(
         key="maintenance",
         label="Maintenance / Update Notice",

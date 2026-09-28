@@ -31,6 +31,8 @@ from aiogram.filters import Command
 from aiogram.types import (
     CallbackQuery,
     ChatMemberUpdated,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
     Message,
 )
 
@@ -93,6 +95,31 @@ def _is_private(message: Message) -> bool:
     return getattr(message.chat, "type", "private") == "private"
 
 
+def access_keyboard() -> InlineKeyboardMarkup:
+    """The 'Access' contact button shown on the non-member /start notice."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Access", url=configmod.ACCESS_CONTACT_URL)]
+        ]
+    )
+
+
+def _sync_profile_on_allow(services: Services, message: Message) -> None:
+    """Fire-and-forget profile capture for an allowed user (auto-allow=True)."""
+    try:
+        if message.from_user and hasattr(services.user_store, "sync_user_profile"):
+            asyncio.create_task(
+                services.user_store.sync_user_profile(
+                    message.from_user.id,
+                    full_name=getattr(message.from_user, "full_name", None),
+                    username=getattr(message.from_user, "username", None),
+                    auto_allow=True,
+                )
+            )
+    except Exception:  # noqa: BLE001
+        log.warning("user_profile_sync_failed", exc_info=True)
+
+
 async def _gate_access(
     services: Services, message: Message, start_cmd: bool = False
 ) -> bool:
@@ -122,18 +149,7 @@ async def _gate_access(
                 pass
         return False
     else:
-        try:
-            if message.from_user and hasattr(services.user_store, "sync_user_profile"):
-                asyncio.create_task(
-                    services.user_store.sync_user_profile(
-                        message.from_user.id,
-                        full_name=getattr(message.from_user, "full_name", None),
-                        username=getattr(message.from_user, "username", None),
-                        auto_allow=True,
-                    )
-                )
-        except Exception:  # noqa: BLE001
-            log.warning("user_profile_sync_failed", exc_info=True)
+        _sync_profile_on_allow(services, message)
     return allowed
 
 
@@ -185,8 +201,35 @@ async def _check_maintenance(
 async def cmd_start(message: Message, services: Services) -> None:
     # Fresh lookup: a user added to the group must get in on the first
     # /start, never wait out a cached deny from before they joined.
-    if not await _gate_access(services, message, start_cmd=True):
+    if not _is_private(message):
         return
+    allowed, reason = await is_group_member(
+        services.bot, services.cache, message.from_user.id,
+        start_cmd=True, user_store=services.user_store,
+    )
+    if not allowed:
+        log.info("access_denied user=%s reason=%s", message.from_user.id, reason)
+        # Unlike every other path (silent drop keeps the bot invisible to
+        # outsiders), /start is an explicit onboarding action: reveal a
+        # bilingual notice with a contact button so a non-member knows how
+        # to request access. Suspended users keep their own notice.
+        if reason == "suspended":
+            try:
+                warn = strings.get_emoji("warning")
+                await message.answer(f"{warn} Your account access has been suspended by an administrator.", parse_mode="HTML")
+            except Exception:
+                pass
+        else:
+            try:
+                await message.answer(
+                    strings.no_access_text(),
+                    parse_mode="HTML",
+                    reply_markup=access_keyboard(),
+                )
+            except Exception:
+                log.warning("access_notice_failed", exc_info=True)
+        return
+    _sync_profile_on_allow(services, message)
     if await _check_maintenance(services, message):
         return
     await services.user_store.set_target(message.from_user.id, "en")
