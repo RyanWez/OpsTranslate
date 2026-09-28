@@ -24,7 +24,7 @@ Enterprise Telegram translation bot with an **Asymmetric Term-Policy Engine** (p
   * **Encrypted Credentials at Rest**: Third-party AI API keys in PostgreSQL are encrypted using Fernet (AES-128-CBC + HMAC-SHA256).
   * **Brute-Force Rate Limiter**: Admin login endpoint tracks failed attempts per IP (5 failures = 5-minute lockout with HTTP 429).
   * **Timed HMAC Sessions**: Admin session tokens use timestamped HMAC-SHA256 signatures with 7-day expiration.
-  * **Privacy Compliance**: No message texts or translation bodies are ever logged; only metadata (`text_hash`, `char_len`, `provider`, `latency_ms`, `policy_hits`).
+  * **Privacy Compliance**: The usage log (`/status` telemetry, audit stream) stores only metadata — `text_hash`, `char_len`, `provider`, `latency_ms`, `policy_hits`. The separate **Translation History** audit store (opt-in staff feature at `/admin` History) does retain the input/masked/output text so staff can review translation quality; it is prunable via the History page or `DELETE /api/admin/history/prune`.
 * **Operational Tooling**:
   * Dual-mode PostgreSQL backup & restore CLI (`scripts/backup_db.py`).
   * 60-second multi-worker provider synchronization in background watchdog.
@@ -188,21 +188,43 @@ Automate backups for Neon Serverless or self-hosted PostgreSQL:
 
 ## Production Deployment (Webhook Mode)
 
-### 1. Docker / Koyeb Deployment
-Build and run using the included `Dockerfile`:
+### 1. Fly.io Deployment (primary)
+The repo ships a `fly.toml` and a multi-stage `Dockerfile` (builds the Vue admin
+UI, then the Python image). Deploy with the Fly CLI:
+```bash
+fly deploy
+```
+Set the required secrets first (never commit them):
+```bash
+fly secrets set BOT_TOKEN=... DATABASE_URL=... \
+                ADMIN_PASSWORD=<strong-password> \
+                ENCRYPTION_KEY=<strong-32-byte-secret> \
+                WEBHOOK_SECRET=... WEBHOOK_PATH_SECRET=... \
+                PUBLIC_URL=https://<app>.fly.dev
+# Optional: bucket the admin login lockout by real client IP behind Fly's proxy
+fly secrets set TRUSTED_CLIENT_IP_HEADER=Fly-Client-IP
+```
+> `ADMIN_PASSWORD` and `ENCRYPTION_KEY` are mandatory and fail-closed: without a
+> strong `ADMIN_PASSWORD` the admin panel rejects every login, and without
+> `ENCRYPTION_KEY` provider API keys can neither be saved nor decrypted. Rotating
+> `ENCRYPTION_KEY` makes previously stored provider keys undecryptable — re-enter
+> them in the `/admin` Providers page after changing it.
+
+### 2. Docker (portable)
+Build and run the same image anywhere:
 ```bash
 docker build -t opstranslate-bot .
 docker run -p 8000:8000 --env-file .env opstranslate-bot
 ```
 
-### 2. Webhook Configuration
+### 3. Webhook Configuration
 In production (`MODE=webhook`):
 * Set `PUBLIC_URL=https://your-domain.com`
 * Set `WEBHOOK_PATH_SECRET=random_secret_path`
 * Set `WEBHOOK_SECRET=random_header_token`
-* The bot registers its webhook on startup with Telegram and validates the `X-Telegram-Bot-Api-Secret-Token` header.
+* The bot registers its webhook on startup with Telegram and validates the `X-Telegram-Bot-Api-Secret-Token` header (constant-time comparison).
 
-### 3. Monitoring & Dead-Man's Switch
+### 4. Monitoring & Dead-Man's Switch
 Point an external monitoring service (BetterStack / UptimeRobot) at `/healthz`.
 The `/healthz` endpoint verifies:
 * Database connection status.

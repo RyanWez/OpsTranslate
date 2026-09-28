@@ -2,7 +2,7 @@
 
 Two run modes via MODE:
   polling - local testing, no public URL needed.
-  webhook - production (Koyeb). POST /webhook/{WEBHOOK_PATH_SECRET}.
+  webhook - production (Fly.io). POST /webhook/{WEBHOOK_PATH_SECRET}.
 
 Gate 1 (webhook security) is enforced on the webhook endpoint: the path
 secret must match AND the X-Telegram-Bot-Api-Secret-Token header must
